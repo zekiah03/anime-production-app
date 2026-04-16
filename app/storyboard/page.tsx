@@ -1,17 +1,27 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Music, Users, MessageSquare, Film, Plus, Trash2, Edit2, GripVertical, Layers } from 'lucide-react'
 import type { Scene, Dialogue, SceneWithDialogues } from '@/types/db'
+import {
+  deleteScene,
+  deleteSceneDialogue,
+  getAllDialogues,
+  getAllSceneDialogues,
+  getAllScenes,
+  saveScene,
+  saveSceneDialogue,
+  saveScenesBatch,
+} from '@/lib/db'
 
 export default function StoryboardPage() {
-  // TODO: DBを組んだらここをfetch等に差し替える
   const [scenes, setScenes] = useState<SceneWithDialogues[]>([])
-  const [dialogues] = useState<Dialogue[]>([])
+  const [dialogues, setDialogues] = useState<Dialogue[]>([])
+  const [loading, setLoading] = useState(true)
   const [showSceneForm, setShowSceneForm] = useState(false)
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null)
   const [sceneFormData, setSceneFormData] = useState({ title: '', description: '' })
@@ -19,7 +29,35 @@ export default function StoryboardPage() {
   const [dialogueToAdd, setDialogueToAdd] = useState('')
   const [draggedSceneId, setDraggedSceneId] = useState<string | null>(null)
 
-  function handleAddScene(e: React.FormEvent) {
+  useEffect(() => {
+    loadAll()
+  }, [])
+
+  async function loadAll() {
+    try {
+      const [rawScenes, sceneDialogues, allDialogues] = await Promise.all([
+        getAllScenes(),
+        getAllSceneDialogues(),
+        getAllDialogues(),
+      ])
+      const dialogueById = new Map(allDialogues.map((d) => [d.id, d]))
+      const combined: SceneWithDialogues[] = rawScenes.map((scene) => ({
+        ...scene,
+        dialogues: sceneDialogues
+          .filter((sd) => sd.scene_id === scene.id)
+          .sort((a, b) => a.order_index - b.order_index)
+          .map((sd) => ({ ...sd, dialogue: dialogueById.get(sd.dialogue_id) ?? null })),
+      }))
+      setScenes(combined)
+      setDialogues(allDialogues)
+    } catch (e) {
+      console.error('[anime-app] load storyboard failed', e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleAddScene(e: React.FormEvent) {
     e.preventDefault()
     if (!sceneFormData.title.trim()) return
 
@@ -27,16 +65,20 @@ export default function StoryboardPage() {
     const maxOrder = scenes.length > 0 ? Math.max(...scenes.map((s) => s.order_index)) : -1
 
     if (editingSceneId) {
+      const existing = scenes.find((s) => s.id === editingSceneId)
+      if (!existing) return
+      const updated: Scene = {
+        id: existing.id,
+        title: sceneFormData.title,
+        description: sceneFormData.description || null,
+        order_index: existing.order_index,
+        created_at: existing.created_at,
+        updated_at: now,
+      }
+      await saveScene(updated)
       setScenes((prev) =>
         prev.map((s) =>
-          s.id === editingSceneId
-            ? {
-                ...s,
-                title: sceneFormData.title,
-                description: sceneFormData.description || null,
-                updated_at: now,
-              }
-            : s,
+          s.id === editingSceneId ? { ...updated, dialogues: s.dialogues } : s,
         ),
       )
       setEditingSceneId(null)
@@ -50,6 +92,10 @@ export default function StoryboardPage() {
         updated_at: now,
         dialogues: [],
       }
+      // Strip 'dialogues' before persisting Scene
+      const { dialogues: _drop, ...sceneRow } = newScene
+      void _drop
+      await saveScene(sceneRow)
       setScenes((prev) => [...prev, newScene])
     }
 
@@ -57,40 +103,43 @@ export default function StoryboardPage() {
     setShowSceneForm(false)
   }
 
-  function handleDeleteScene(id: string) {
+  async function handleDeleteScene(id: string) {
     if (!confirm('このシーンを削除してよろしいですか？')) return
+    await deleteScene(id)
     setScenes((prev) => prev.filter((s) => s.id !== id))
+    if (selectedSceneId === id) setSelectedSceneId(null)
   }
 
-  function handleAddDialogueToScene(dialogueId: string) {
+  async function handleAddDialogueToScene(dialogueId: string) {
     if (!selectedSceneId) return
+    const target = scenes.find((s) => s.id === selectedSceneId)
+    if (!target) return
+
     const now = new Date().toISOString()
+    const maxOrder = target.dialogues.reduce((max, d) => Math.max(max, d.order_index), -1)
+    const dialogue = dialogues.find((d) => d.id === dialogueId) ?? null
+
+    const newSceneDialogue = {
+      id: crypto.randomUUID(),
+      scene_id: selectedSceneId,
+      dialogue_id: dialogueId,
+      order_index: maxOrder + 1,
+      created_at: now,
+    }
+    await saveSceneDialogue(newSceneDialogue)
 
     setScenes((prev) =>
-      prev.map((s) => {
-        if (s.id !== selectedSceneId) return s
-        const maxOrder = s.dialogues.reduce((max, d) => Math.max(max, d.order_index), -1)
-        const dialogue = dialogues.find((d) => d.id === dialogueId) ?? null
-        return {
-          ...s,
-          dialogues: [
-            ...s.dialogues,
-            {
-              id: crypto.randomUUID(),
-              scene_id: selectedSceneId,
-              dialogue_id: dialogueId,
-              order_index: maxOrder + 1,
-              created_at: now,
-              dialogue,
-            },
-          ],
-        }
-      }),
+      prev.map((s) =>
+        s.id === selectedSceneId
+          ? { ...s, dialogues: [...s.dialogues, { ...newSceneDialogue, dialogue }] }
+          : s,
+      ),
     )
     setDialogueToAdd('')
   }
 
-  function handleRemoveDialogue(sceneDialogueId: string) {
+  async function handleRemoveDialogue(sceneDialogueId: string) {
+    await deleteSceneDialogue(sceneDialogueId)
     setScenes((prev) =>
       prev.map((s) => ({
         ...s,
@@ -99,13 +148,19 @@ export default function StoryboardPage() {
     )
   }
 
-  function handleReorderScenes(from: number, to: number) {
-    setScenes((prev) => {
-      const reordered = [...prev]
-      const [moved] = reordered.splice(from, 1)
-      reordered.splice(to, 0, moved)
-      return reordered.map((s, i) => ({ ...s, order_index: i }))
-    })
+  async function handleReorderScenes(from: number, to: number) {
+    const reordered = [...scenes]
+    const [moved] = reordered.splice(from, 1)
+    reordered.splice(to, 0, moved)
+    const renumbered = reordered.map((s, i) => ({ ...s, order_index: i }))
+    // persist (strip dialogues)
+    await saveScenesBatch(
+      renumbered.map(({ dialogues: _d, ...row }) => {
+        void _d
+        return row
+      }),
+    )
+    setScenes(renumbered)
   }
 
   function handleEditScene(scene: Scene) {
@@ -222,7 +277,11 @@ export default function StoryboardPage() {
             {/* シーン一覧 */}
             <div className="lg:col-span-2">
               <h3 className="text-xl font-semibold text-foreground mb-4">シーン</h3>
-              {scenes.length === 0 ? (
+              {loading ? (
+                <div className="text-center py-12">
+                  <p className="text-muted-foreground">読み込み中...</p>
+                </div>
+              ) : scenes.length === 0 ? (
                 <Card className="bg-card border-border p-12 text-center">
                   <Film size={48} className="mx-auto text-muted-foreground mb-4" />
                   <h3 className="text-xl font-semibold text-foreground mb-2">シーンがありません</h3>

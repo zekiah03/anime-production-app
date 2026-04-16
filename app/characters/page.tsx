@@ -1,34 +1,45 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Music, Users, MessageSquare, Film, Plus, Trash2, Edit2, Layers } from 'lucide-react'
 import type { Character } from '@/types/db'
+import { deleteCharacter, getAllCharacters, saveCharacter } from '@/lib/db'
 
 export default function CharactersPage() {
-  // TODO: DBを組んだらここをfetch等に差し替える
   const [characters, setCharacters] = useState<Character[]>([])
+  const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [formData, setFormData] = useState({ name: '', description: '' })
   const [editingId, setEditingId] = useState<string | null>(null)
 
-  function handleSubmit(e: React.FormEvent) {
+  useEffect(() => {
+    getAllCharacters()
+      .then(setCharacters)
+      .catch((e) => console.error('[anime-app] load characters failed', e))
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!formData.name.trim()) return
 
     const now = new Date().toISOString()
 
     if (editingId) {
-      setCharacters((prev) =>
-        prev.map((c) =>
-          c.id === editingId
-            ? { ...c, name: formData.name, description: formData.description || null, updated_at: now }
-            : c,
-        ),
-      )
+      const existing = characters.find((c) => c.id === editingId)
+      if (!existing) return
+      const updated: Character = {
+        ...existing,
+        name: formData.name,
+        description: formData.description || null,
+        updated_at: now,
+      }
+      await saveCharacter(updated)
+      setCharacters((prev) => prev.map((c) => (c.id === editingId ? updated : c)))
       setEditingId(null)
     } else {
       const newChar: Character = {
@@ -39,14 +50,16 @@ export default function CharactersPage() {
         created_at: now,
         updated_at: now,
       }
+      await saveCharacter(newChar)
       setCharacters((prev) => [newChar, ...prev])
     }
     setFormData({ name: '', description: '' })
     setShowForm(false)
   }
 
-  function handleDelete(id: string) {
+  async function handleDelete(id: string) {
     if (!confirm('削除してよろしいですか？')) return
+    await deleteCharacter(id)
     setCharacters((prev) => prev.filter((c) => c.id !== id))
   }
 
@@ -160,7 +173,11 @@ export default function CharactersPage() {
             </Card>
           )}
 
-          {characters.length === 0 ? (
+          {loading ? (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">読み込み中...</p>
+            </div>
+          ) : characters.length === 0 ? (
             <Card className="bg-card border-border p-12 text-center">
               <Users size={48} className="mx-auto text-muted-foreground mb-4" />
               <h3 className="text-xl font-semibold text-foreground mb-2">キャラクターがありません</h3>

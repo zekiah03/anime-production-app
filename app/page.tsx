@@ -1,11 +1,32 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Music, Users, MessageSquare, Film, Plus, Layers } from 'lucide-react'
+import type { Character } from '@/types/db'
+import { getAllCharacters, getCounts } from '@/lib/db'
 
 export default function Dashboard() {
+  const [counts, setCounts] = useState({
+    characters: 0,
+    audio_files: 0,
+    dialogues: 0,
+    scenes: 0,
+    illustrations: 0,
+  })
+  const [recentCharacters, setRecentCharacters] = useState<Character[]>([])
+
+  useEffect(() => {
+    Promise.all([getCounts(), getAllCharacters()])
+      .then(([c, chars]) => {
+        setCounts(c)
+        setRecentCharacters(chars.slice(0, 5))
+      })
+      .catch((e) => console.error('[anime-app] dashboard load failed', e))
+  }, [])
+
   return (
     <div className="flex h-screen bg-background">
       {/* サイドバー */}
@@ -125,12 +146,32 @@ export default function Dashboard() {
               <Card className="bg-card border-border p-6">
                 <h3 className="text-xl font-semibold text-foreground mb-4">最近のキャラクター</h3>
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between p-4 bg-background rounded-lg">
-                    <div>
-                      <p className="font-medium text-foreground">キャラクター未作成</p>
-                      <p className="text-sm text-muted-foreground">最初のキャラクターを作成してください</p>
+                  {recentCharacters.length === 0 ? (
+                    <div className="flex items-center justify-between p-4 bg-background rounded-lg">
+                      <div>
+                        <p className="font-medium text-foreground">キャラクター未作成</p>
+                        <p className="text-sm text-muted-foreground">最初のキャラクターを作成してください</p>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    recentCharacters.map((c) => (
+                      <Link
+                        key={c.id}
+                        href="/characters"
+                        className="flex items-center justify-between p-4 bg-background rounded-lg hover:bg-primary/10 transition"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium text-foreground truncate">{c.name}</p>
+                          {c.description && (
+                            <p className="text-sm text-muted-foreground truncate">{c.description}</p>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground flex-shrink-0 ml-4">
+                          {new Date(c.created_at).toLocaleDateString('ja-JP')}
+                        </p>
+                      </Link>
+                    ))
+                  )}
                 </div>
               </Card>
             </div>
@@ -141,15 +182,23 @@ export default function Dashboard() {
                 <div className="space-y-4">
                   <div>
                     <p className="text-sm text-muted-foreground">キャラクター数</p>
-                    <p className="text-2xl font-bold text-primary">0</p>
+                    <p className="text-2xl font-bold text-primary">{counts.characters}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">イラスト数</p>
+                    <p className="text-2xl font-bold text-accent">{counts.illustrations}</p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">音声ファイル</p>
-                    <p className="text-2xl font-bold text-accent">0</p>
+                    <p className="text-2xl font-bold text-primary">{counts.audio_files}</p>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">セリフ数</p>
-                    <p className="text-2xl font-bold text-primary">0</p>
+                    <p className="text-2xl font-bold text-accent">{counts.dialogues}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">シーン数</p>
+                    <p className="text-2xl font-bold text-primary">{counts.scenes}</p>
                   </div>
                 </div>
               </Card>

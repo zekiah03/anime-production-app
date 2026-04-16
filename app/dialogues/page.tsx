@@ -1,18 +1,25 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Music, Users, MessageSquare, Film, Plus, Trash2, Edit2, Play, Layers } from 'lucide-react'
 import type { Dialogue, Character, AudioFile } from '@/types/db'
+import {
+  deleteDialogue,
+  getAllAudioFiles,
+  getAllCharacters,
+  getAllDialogues,
+  saveDialogue,
+} from '@/lib/db'
 
 export default function DialoguesPage() {
-  // TODO: DBを組んだらここをfetch等に差し替える
   const [dialogues, setDialogues] = useState<Dialogue[]>([])
-  const [characters] = useState<Character[]>([])
-  const [audioFiles] = useState<AudioFile[]>([])
+  const [characters, setCharacters] = useState<Character[]>([])
+  const [audioFiles, setAudioFiles] = useState<AudioFile[]>([])
+  const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
@@ -23,28 +30,37 @@ export default function DialoguesPage() {
     notes: '',
   })
 
-  function handleSubmit(e: React.FormEvent) {
+  useEffect(() => {
+    Promise.all([getAllDialogues(), getAllCharacters(), getAllAudioFiles()])
+      .then(([d, c, a]) => {
+        setDialogues(d)
+        setCharacters(c)
+        setAudioFiles(a)
+      })
+      .catch((e) => console.error('[anime-app] load dialogues page failed', e))
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!formData.text.trim()) return
 
     const now = new Date().toISOString()
 
     if (editingId) {
-      setDialogues((prev) =>
-        prev.map((d) =>
-          d.id === editingId
-            ? {
-                ...d,
-                text: formData.text,
-                character_id: formData.character_id || null,
-                audio_id: formData.audio_id || null,
-                emotion: formData.emotion || null,
-                notes: formData.notes || null,
-                updated_at: now,
-              }
-            : d,
-        ),
-      )
+      const existing = dialogues.find((d) => d.id === editingId)
+      if (!existing) return
+      const updated: Dialogue = {
+        ...existing,
+        text: formData.text,
+        character_id: formData.character_id || null,
+        audio_id: formData.audio_id || null,
+        emotion: formData.emotion || null,
+        notes: formData.notes || null,
+        updated_at: now,
+      }
+      await saveDialogue(updated)
+      setDialogues((prev) => prev.map((d) => (d.id === editingId ? updated : d)))
       setEditingId(null)
     } else {
       const newDialogue: Dialogue = {
@@ -57,14 +73,16 @@ export default function DialoguesPage() {
         created_at: now,
         updated_at: now,
       }
+      await saveDialogue(newDialogue)
       setDialogues((prev) => [newDialogue, ...prev])
     }
 
     resetForm()
   }
 
-  function handleDelete(id: string) {
+  async function handleDelete(id: string) {
     if (!confirm('削除してよろしいですか？')) return
+    await deleteDialogue(id)
     setDialogues((prev) => prev.filter((d) => d.id !== id))
   }
 
@@ -240,7 +258,11 @@ export default function DialoguesPage() {
             </Card>
           )}
 
-          {dialogues.length === 0 ? (
+          {loading ? (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">読み込み中...</p>
+            </div>
+          ) : dialogues.length === 0 ? (
             <Card className="bg-card border-border p-12 text-center">
               <MessageSquare size={48} className="mx-auto text-muted-foreground mb-4" />
               <h3 className="text-xl font-semibold text-foreground mb-2">セリフがありません</h3>

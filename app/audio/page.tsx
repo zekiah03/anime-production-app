@@ -1,16 +1,22 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Music, Users, MessageSquare, Film, Trash2, Play, Pause, Download, Layers } from 'lucide-react'
 import type { AudioFile, Character } from '@/types/db'
+import {
+  deleteAudioFile,
+  getAllAudioFiles,
+  getAllCharacters,
+  saveAudioFile,
+} from '@/lib/db'
 
 export default function AudioPage() {
-  // TODO: DB+Storageを組んだらここをfetch/upload等に差し替える
   const [audioFiles, setAudioFiles] = useState<AudioFile[]>([])
-  const [characters] = useState<Character[]>([])
+  const [characters, setCharacters] = useState<Character[]>([])
+  const [loading, setLoading] = useState(true)
   const [isRecording, setIsRecording] = useState(false)
   const [selectedCharacterId, setSelectedCharacterId] = useState<string>('')
   const [audioName, setAudioName] = useState('')
@@ -18,6 +24,16 @@ export default function AudioPage() {
   const audioChunksRef = useRef<Blob[]>([])
   const [playingId, setPlayingId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  useEffect(() => {
+    Promise.all([getAllAudioFiles(), getAllCharacters()])
+      .then(([audio, chars]) => {
+        setAudioFiles(audio)
+        setCharacters(chars)
+      })
+      .catch((e) => console.error('[anime-app] load audio page failed', e))
+      .finally(() => setLoading(false))
+  }, [])
 
   async function startRecording() {
     try {
@@ -41,7 +57,7 @@ export default function AudioPage() {
   function stopRecording() {
     if (!mediaRecorderRef.current) return
 
-    mediaRecorderRef.current.onstop = () => {
+    mediaRecorderRef.current.onstop = async () => {
       const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
       const blobUrl = URL.createObjectURL(audioBlob)
 
@@ -49,12 +65,19 @@ export default function AudioPage() {
         id: crypto.randomUUID(),
         name: audioName || 'No name',
         file_url: blobUrl,
+        file_blob: audioBlob,
         duration: audioChunksRef.current.length > 0 ? audioBlob.size / 16000 : 0,
         character_id: selectedCharacterId || null,
         created_at: new Date().toISOString(),
       }
 
-      setAudioFiles((prev) => [newAudio, ...prev])
+      try {
+        await saveAudioFile(newAudio)
+        setAudioFiles((prev) => [newAudio, ...prev])
+      } catch (e) {
+        console.error('[anime-app] save audio failed', e)
+        alert('音声の保存に失敗しました')
+      }
       setAudioName('')
       setSelectedCharacterId('')
     }
@@ -64,8 +87,9 @@ export default function AudioPage() {
     setIsRecording(false)
   }
 
-  function handleDelete(id: string) {
+  async function handleDelete(id: string) {
     if (!confirm('削除してよろしいですか？')) return
+    await deleteAudioFile(id)
     setAudioFiles((prev) => {
       const target = prev.find((a) => a.id === id)
       if (target?.file_url.startsWith('blob:')) URL.revokeObjectURL(target.file_url)
@@ -176,7 +200,11 @@ export default function AudioPage() {
           {/* 音声ファイル一覧 */}
           <div>
             <h3 className="text-xl font-semibold text-foreground mb-4">録音済みファイル</h3>
-            {audioFiles.length === 0 ? (
+            {loading ? (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground">読み込み中...</p>
+              </div>
+            ) : audioFiles.length === 0 ? (
               <Card className="bg-card border-border p-12 text-center">
                 <Music size={48} className="mx-auto text-muted-foreground mb-4" />
                 <h3 className="text-xl font-semibold text-foreground mb-2">音声ファイルがありません</h3>

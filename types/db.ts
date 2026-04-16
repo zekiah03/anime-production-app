@@ -12,7 +12,8 @@ export interface Character {
 export interface AudioFile {
   id: string
   name: string
-  file_url: string
+  file_url: string // blob URL (derived from file_blob at runtime)
+  file_blob?: Blob // the actual audio data (persisted to IndexedDB)
   duration: number | null
   character_id: string | null
   created_at: string
@@ -67,7 +68,8 @@ export interface Layer {
   id: string
   illustration_id: string
   name: string
-  image_url: string
+  image_url: string // blob URL (derived from image_blob at runtime)
+  image_blob?: Blob // the actual image data (persisted to IndexedDB)
   visible: boolean
   opacity: number // 0..1
   order_index: number // 大きいほど上に表示される

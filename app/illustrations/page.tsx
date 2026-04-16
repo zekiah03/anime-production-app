@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -20,51 +20,87 @@ import {
   Upload,
   Image as ImageIcon,
 } from 'lucide-react'
-import type { IllustrationWithLayers, Layer } from '@/types/db'
+import type { IllustrationWithLayers, Layer, Illustration } from '@/types/db'
+import {
+  deleteIllustration,
+  deleteLayer,
+  getAllIllustrations,
+  getLayersByIllustration,
+  saveIllustration,
+  saveLayer,
+  saveLayersBatch,
+} from '@/lib/db'
 
 export default function IllustrationsPage() {
-  // TODO: DB+Storageを組んだらここをfetch/upload等に差し替える
   const [illustrations, setIllustrations] = useState<IllustrationWithLayers[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [newIllustrationName, setNewIllustrationName] = useState('')
+  const [loading, setLoading] = useState(true)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const selected = illustrations.find((i) => i.id === selectedId) ?? null
 
-  function handleCreateIllustration(e: React.FormEvent) {
+  useEffect(() => {
+    getAllIllustrations()
+      .then(async (rows) => {
+        // 各イラストのレイヤーも読み込む
+        const withLayers = await Promise.all(
+          rows.map(async (r) => ({
+            ...r,
+            layers: await getLayersByIllustration(r.id),
+          })),
+        )
+        setIllustrations(withLayers)
+      })
+      .catch((e) => console.error('[anime-app] load illustrations failed', e))
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleCreateIllustration(e: React.FormEvent) {
     e.preventDefault()
     if (!newIllustrationName.trim()) return
     const now = new Date().toISOString()
-    const newIllust: IllustrationWithLayers = {
+    const row: Illustration = {
       id: crypto.randomUUID(),
       name: newIllustrationName.trim(),
       created_at: now,
       updated_at: now,
-      layers: [],
     }
+    await saveIllustration(row)
+    const newIllust: IllustrationWithLayers = { ...row, layers: [] }
     setIllustrations((prev) => [newIllust, ...prev])
     setSelectedId(newIllust.id)
     setNewIllustrationName('')
   }
 
-  function handleDeleteIllustration(id: string) {
+  async function handleDeleteIllustration(id: string) {
     if (!confirm('このイラスト(とすべてのレイヤー)を削除してよろしいですか？')) return
     const target = illustrations.find((i) => i.id === id)
     target?.layers.forEach((l) => {
       if (l.image_url.startsWith('blob:')) URL.revokeObjectURL(l.image_url)
     })
+    await deleteIllustration(id)
     setIllustrations((prev) => prev.filter((i) => i.id !== id))
     if (selectedId === id) setSelectedId(null)
   }
 
-  function handleRenameIllustration(id: string, name: string) {
+  async function handleRenameIllustration(id: string, name: string) {
     const now = new Date().toISOString()
+    const existing = illustrations.find((i) => i.id === id)
+    if (!existing) return
+    const updated: Illustration = {
+      id: existing.id,
+      name,
+      created_at: existing.created_at,
+      updated_at: now,
+    }
+    await saveIllustration(updated)
     setIllustrations((prev) =>
       prev.map((i) => (i.id === id ? { ...i, name, updated_at: now } : i)),
     )
   }
 
-  function updateLayers(
+  function updateLayersLocal(
     illustrationId: string,
     mapper: (layers: Layer[]) => Layer[],
   ) {
@@ -78,7 +114,7 @@ export default function IllustrationsPage() {
     )
   }
 
-  function handleAddLayerFiles(files: FileList | null) {
+  async function handleAddLayerFiles(files: FileList | null) {
     if (!selected || !files || files.length === 0) return
     const baseOrder = selected.layers.reduce((max, l) => Math.max(max, l.order_index), -1)
     const now = new Date().toISOString()
@@ -88,63 +124,81 @@ export default function IllustrationsPage() {
       illustration_id: selected.id,
       name: file.name.replace(/\.[^.]+$/, ''),
       image_url: URL.createObjectURL(file),
+      image_blob: file,
       visible: true,
       opacity: 1,
       order_index: baseOrder + i + 1,
       created_at: now,
     }))
 
-    updateLayers(selected.id, (layers) => [...layers, ...newLayers])
+    try {
+      await Promise.all(newLayers.map((l) => saveLayer(l)))
+      updateLayersLocal(selected.id, (layers) => [...layers, ...newLayers])
+    } catch (e) {
+      console.error('[anime-app] save layer failed', e)
+      alert('レイヤーの保存に失敗しました')
+    }
   }
 
-  function handleDeleteLayer(layerId: string) {
+  async function handleDeleteLayer(layerId: string) {
     if (!selected) return
     const layer = selected.layers.find((l) => l.id === layerId)
     if (layer?.image_url.startsWith('blob:')) URL.revokeObjectURL(layer.image_url)
-    updateLayers(selected.id, (layers) => layers.filter((l) => l.id !== layerId))
+    await deleteLayer(layerId)
+    updateLayersLocal(selected.id, (layers) => layers.filter((l) => l.id !== layerId))
   }
 
-  function handleRenameLayer(layerId: string, name: string) {
+  async function handleRenameLayer(layerId: string, name: string) {
     if (!selected) return
-    updateLayers(selected.id, (layers) =>
-      layers.map((l) => (l.id === layerId ? { ...l, name } : l)),
+    const layer = selected.layers.find((l) => l.id === layerId)
+    if (!layer) return
+    const updated = { ...layer, name }
+    await saveLayer(updated)
+    updateLayersLocal(selected.id, (layers) =>
+      layers.map((l) => (l.id === layerId ? updated : l)),
     )
   }
 
-  function handleToggleVisible(layerId: string) {
+  async function handleToggleVisible(layerId: string) {
     if (!selected) return
-    updateLayers(selected.id, (layers) =>
-      layers.map((l) => (l.id === layerId ? { ...l, visible: !l.visible } : l)),
+    const layer = selected.layers.find((l) => l.id === layerId)
+    if (!layer) return
+    const updated = { ...layer, visible: !layer.visible }
+    await saveLayer(updated)
+    updateLayersLocal(selected.id, (layers) =>
+      layers.map((l) => (l.id === layerId ? updated : l)),
     )
   }
 
-  function handleChangeOpacity(layerId: string, opacity: number) {
+  async function handleChangeOpacity(layerId: string, opacity: number) {
     if (!selected) return
-    updateLayers(selected.id, (layers) =>
-      layers.map((l) => (l.id === layerId ? { ...l, opacity } : l)),
+    const layer = selected.layers.find((l) => l.id === layerId)
+    if (!layer) return
+    const updated = { ...layer, opacity }
+    // UIはスライダー操作のたびにサンプル書き込みしたくないので、ローカル先行 → IndexedDBにfire-and-forget
+    updateLayersLocal(selected.id, (layers) =>
+      layers.map((l) => (l.id === layerId ? updated : l)),
     )
+    saveLayer(updated).catch((e) => console.error('[anime-app] save opacity failed', e))
   }
 
   // UIでは「上が前面」なので order_index 降順で並べる。上下ボタンで order を入れ替える
-  function handleMoveLayer(layerId: string, direction: 'up' | 'down') {
+  async function handleMoveLayer(layerId: string, direction: 'up' | 'down') {
     if (!selected) return
-    updateLayers(selected.id, (layers) => {
-      // 表示用(上=前面)順に並べる
-      const sortedDesc = [...layers].sort((a, b) => b.order_index - a.order_index)
-      const idx = sortedDesc.findIndex((l) => l.id === layerId)
-      if (idx === -1) return layers
-      const swapWith = direction === 'up' ? idx - 1 : idx + 1
-      if (swapWith < 0 || swapWith >= sortedDesc.length) return layers
-      const a = sortedDesc[idx]
-      const b = sortedDesc[swapWith]
-      const newOrderA = b.order_index
-      const newOrderB = a.order_index
-      return layers.map((l) => {
-        if (l.id === a.id) return { ...l, order_index: newOrderA }
-        if (l.id === b.id) return { ...l, order_index: newOrderB }
-        return l
-      })
+    const sortedDesc = [...selected.layers].sort((a, b) => b.order_index - a.order_index)
+    const idx = sortedDesc.findIndex((l) => l.id === layerId)
+    if (idx === -1) return
+    const swapWith = direction === 'up' ? idx - 1 : idx + 1
+    if (swapWith < 0 || swapWith >= sortedDesc.length) return
+    const a = sortedDesc[idx]
+    const b = sortedDesc[swapWith]
+    const newLayers = selected.layers.map((l) => {
+      if (l.id === a.id) return { ...l, order_index: b.order_index }
+      if (l.id === b.id) return { ...l, order_index: a.order_index }
+      return l
     })
+    await saveLayersBatch(newLayers.filter((l) => l.id === a.id || l.id === b.id))
+    updateLayersLocal(selected.id, () => newLayers)
   }
 
   const layersTopFirst = selected
@@ -219,7 +273,11 @@ export default function IllustrationsPage() {
                   </Button>
                 </form>
 
-                {illustrations.length === 0 ? (
+                {loading ? (
+                  <div className="text-center py-8 text-sm text-muted-foreground">
+                    読み込み中...
+                  </div>
+                ) : illustrations.length === 0 ? (
                   <div className="text-center py-8 text-sm text-muted-foreground">
                     イラストがまだありません
                   </div>
