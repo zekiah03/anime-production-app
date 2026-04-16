@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Music, Users, MessageSquare, Film, Plus, Trash2, Edit2, GripVertical } from 'lucide-react'
+import { Music, Users, MessageSquare, Film, Plus, Trash2, Edit2, GripVertical, Layers } from 'lucide-react'
 import type { Scene, Dialogue, SceneWithDialogues } from '@/types/db'
 
 export default function StoryboardPage() {
@@ -131,6 +131,10 @@ export default function StoryboardPage() {
           <Link href="/characters" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
             <Users size={20} />
             キャラクター
+          </Link>
+          <Link href="/illustrations" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
+            <Layers size={20} />
+            イラスト
           </Link>
           <Link href="/audio" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
             <Music size={20} />

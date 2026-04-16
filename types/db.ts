@@ -53,3 +53,27 @@ export interface SceneWithDialogues extends Scene {
     }
   >
 }
+
+// イラスト(複数レイヤーを持つ1枚の絵)
+export interface Illustration {
+  id: string
+  name: string
+  created_at: string
+  updated_at: string
+}
+
+// レイヤー(1枚の画像・透明度・表示/非表示・重ね順)
+export interface Layer {
+  id: string
+  illustration_id: string
+  name: string
+  image_url: string
+  visible: boolean
+  opacity: number // 0..1
+  order_index: number // 大きいほど上に表示される
+  created_at: string
+}
+
+export interface IllustrationWithLayers extends Illustration {
+  layers: Layer[]
+}

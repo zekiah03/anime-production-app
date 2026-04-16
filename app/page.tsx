@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Music, Users, MessageSquare, Film, Plus } from 'lucide-react'
+import { Music, Users, MessageSquare, Film, Plus, Layers } from 'lucide-react'
 
 export default function Dashboard() {
   return (
@@ -23,6 +23,10 @@ export default function Dashboard() {
           <Link href="/characters" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
             <Users size={20} />
             キャラクター
+          </Link>
+          <Link href="/illustrations" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
+            <Layers size={20} />
+            イラスト
           </Link>
           <Link href="/audio" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
             <Music size={20} />
@@ -48,50 +52,71 @@ export default function Dashboard() {
           </div>
 
           {/* クイックアクションカード */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            <Card className="bg-card border-border hover:border-primary/50 transition p-6 cursor-pointer">
-              <div className="flex items-center justify-between mb-4">
-                <Users className="text-primary" size={24} />
-                <Button size="sm" variant="outline" className="h-8 w-8 p-0">
-                  <Plus size={16} />
-                </Button>
-              </div>
-              <h3 className="font-semibold text-foreground">キャラクター</h3>
-              <p className="text-sm text-muted-foreground mt-1">新規作成</p>
-            </Card>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-8">
+            <Link href="/characters">
+              <Card className="bg-card border-border hover:border-primary/50 transition p-6 cursor-pointer h-full">
+                <div className="flex items-center justify-between mb-4">
+                  <Users className="text-primary" size={24} />
+                  <Button size="sm" variant="outline" className="h-8 w-8 p-0">
+                    <Plus size={16} />
+                  </Button>
+                </div>
+                <h3 className="font-semibold text-foreground">キャラクター</h3>
+                <p className="text-sm text-muted-foreground mt-1">新規作成</p>
+              </Card>
+            </Link>
 
-            <Card className="bg-card border-border hover:border-primary/50 transition p-6 cursor-pointer">
-              <div className="flex items-center justify-between mb-4">
-                <Music className="text-accent" size={24} />
-                <Button size="sm" variant="outline" className="h-8 w-8 p-0">
-                  <Plus size={16} />
-                </Button>
-              </div>
-              <h3 className="font-semibold text-foreground">音声を録音</h3>
-              <p className="text-sm text-muted-foreground mt-1">新規追加</p>
-            </Card>
+            <Link href="/illustrations">
+              <Card className="bg-card border-border hover:border-primary/50 transition p-6 cursor-pointer h-full">
+                <div className="flex items-center justify-between mb-4">
+                  <Layers className="text-primary" size={24} />
+                  <Button size="sm" variant="outline" className="h-8 w-8 p-0">
+                    <Plus size={16} />
+                  </Button>
+                </div>
+                <h3 className="font-semibold text-foreground">イラスト</h3>
+                <p className="text-sm text-muted-foreground mt-1">レイヤー管理</p>
+              </Card>
+            </Link>
 
-            <Card className="bg-card border-border hover:border-primary/50 transition p-6 cursor-pointer">
-              <div className="flex items-center justify-between mb-4">
-                <MessageSquare className="text-primary" size={24} />
-                <Button size="sm" variant="outline" className="h-8 w-8 p-0">
-                  <Plus size={16} />
-                </Button>
-              </div>
-              <h3 className="font-semibold text-foreground">セリフを作成</h3>
-              <p className="text-sm text-muted-foreground mt-1">新規追加</p>
-            </Card>
+            <Link href="/audio">
+              <Card className="bg-card border-border hover:border-primary/50 transition p-6 cursor-pointer h-full">
+                <div className="flex items-center justify-between mb-4">
+                  <Music className="text-accent" size={24} />
+                  <Button size="sm" variant="outline" className="h-8 w-8 p-0">
+                    <Plus size={16} />
+                  </Button>
+                </div>
+                <h3 className="font-semibold text-foreground">音声を録音</h3>
+                <p className="text-sm text-muted-foreground mt-1">新規追加</p>
+              </Card>
+            </Link>
 
-            <Card className="bg-card border-border hover:border-primary/50 transition p-6 cursor-pointer">
-              <div className="flex items-center justify-between mb-4">
-                <Film className="text-accent" size={24} />
-                <Button size="sm" variant="outline" className="h-8 w-8 p-0">
-                  <Plus size={16} />
-                </Button>
-              </div>
-              <h3 className="font-semibold text-foreground">シーンを作成</h3>
-              <p className="text-sm text-muted-foreground mt-1">新規追加</p>
-            </Card>
+            <Link href="/dialogues">
+              <Card className="bg-card border-border hover:border-primary/50 transition p-6 cursor-pointer h-full">
+                <div className="flex items-center justify-between mb-4">
+                  <MessageSquare className="text-primary" size={24} />
+                  <Button size="sm" variant="outline" className="h-8 w-8 p-0">
+                    <Plus size={16} />
+                  </Button>
+                </div>
+                <h3 className="font-semibold text-foreground">セリフを作成</h3>
+                <p className="text-sm text-muted-foreground mt-1">新規追加</p>
+              </Card>
+            </Link>
+
+            <Link href="/storyboard">
+              <Card className="bg-card border-border hover:border-primary/50 transition p-6 cursor-pointer h-full">
+                <div className="flex items-center justify-between mb-4">
+                  <Film className="text-accent" size={24} />
+                  <Button size="sm" variant="outline" className="h-8 w-8 p-0">
+                    <Plus size={16} />
+                  </Button>
+                </div>
+                <h3 className="font-semibold text-foreground">シーンを作成</h3>
+                <p className="text-sm text-muted-foreground mt-1">新規追加</p>
+              </Card>
+            </Link>
           </div>
 
           {/* 最近の活動セクション */}

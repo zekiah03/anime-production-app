@@ -4,7 +4,7 @@ import { useState, useRef } from 'react'
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Music, Users, MessageSquare, Film, Trash2, Play, Pause, Download } from 'lucide-react'
+import { Music, Users, MessageSquare, Film, Trash2, Play, Pause, Download, Layers } from 'lucide-react'
 import type { AudioFile, Character } from '@/types/db'
 
 export default function AudioPage() {
@@ -90,6 +90,10 @@ export default function AudioPage() {
           <Link href="/characters" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
             <Users size={20} />
             キャラクター
+          </Link>
+          <Link href="/illustrations" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
+            <Layers size={20} />
+            イラスト
           </Link>
           <Link href="/audio" className="flex items-center gap-3 px-4 py-3 rounded-lg bg-sidebar-primary/20 text-sidebar-primary font-medium">
             <Music size={20} />
