@@ -78,6 +78,8 @@ export interface Dialogue {
   expression_id: string | null // プレビュー時の表情指定
   emotion: string | null
   notes: string | null
+  // ナレーション(character_id=null)かつ audio なしのときの表示時間 ms。未指定なら 3000。
+  duration_ms?: number | null
   created_at: string
   updated_at: string
 }

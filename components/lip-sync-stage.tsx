@@ -31,6 +31,9 @@ interface LipSyncStageProps {
   characterScale?: number
   // 発話者以外の共演キャラ。 background と main character の間に描画する。
   extraCharacters?: StageExtraCharacter[]
+  // 音声なしのナレーションで使う表示時間 ms。audioUrl が null かつ playing の間に、
+  // この時間が経過したら onEnded を呼ぶ。
+  silentDurationMs?: number
   onEnded?: () => void
   className?: string
 }
@@ -60,6 +63,7 @@ export function LipSyncStage({
   characterX,
   characterScale,
   extraCharacters,
+  silentDurationMs,
   onEnded,
   className,
 }: LipSyncStageProps) {
@@ -146,7 +150,12 @@ export function LipSyncStage({
       audioRef.current?.pause()
       return
     }
-    if (!audioUrl) return
+    if (!audioUrl) {
+      // ナレーション(無音): 指定時間だけ待って onEnded
+      const ms = typeof silentDurationMs === 'number' ? silentDurationMs : 3000
+      const timer = window.setTimeout(() => onEnded?.(), ms)
+      return () => window.clearTimeout(timer)
+    }
     let cancelled = false
     ;(async () => {
       await ensureGraph()
@@ -164,7 +173,7 @@ export function LipSyncStage({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, audioUrl])
+  }, [playing, audioUrl, silentDurationMs])
 
   useEffect(() => {
     return () => {
@@ -269,12 +278,13 @@ export function LipSyncStage({
             objectFit: 'contain',
           }}
         />
-      ) : (
+      ) : character ? (
+        // キャラは指定されているが画像未登録
         <div className="relative text-center text-muted-foreground p-4">
           <Users size={32} className="mx-auto mb-2" />
           <p className="text-xs">画像を登録してください</p>
         </div>
-      )}
+      ) : null /* ナレーション: 主役枠は空 */}
       {caption && playing && (
         <div
           className="absolute inset-x-2 pointer-events-none"

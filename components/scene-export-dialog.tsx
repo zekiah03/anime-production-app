@@ -33,8 +33,8 @@ interface ExportExtra {
 
 interface ResolvedDialogue {
   text: string
-  character: Character
-  audio: AudioFile
+  character: Character | null
+  audio: AudioFile | null
   mouthOpen: CharacterExpression | null
   mouthClosed: CharacterExpression | null
   blink: CharacterExpression | null
@@ -44,6 +44,7 @@ interface ResolvedDialogue {
   characterX: number
   characterScale: number
   extras: ExportExtra[]
+  silentDurationMs: number
 }
 
 // 書き出し解像度は縦型ショート動画を意識した 9:16。将来 UI で切替可能にしてもよい。
@@ -109,8 +110,13 @@ export function SceneExportDialog({
           if (!d) return null
           const character = characters.find((c) => c.id === d.character_id) ?? null
           const audio = audioFiles.find((a) => a.id === d.audio_id) ?? null
-          if (!character || !audio) return null
-          const charExpressions = expressions.filter((x) => x.character_id === character.id)
+          // 採用ルール: (キャラ+音声) or (テキストあり = ナレーション)
+          const isNormal = character && audio
+          const isNarration = !character && d.text.trim().length > 0
+          if (!isNormal && !isNarration) return null
+          const charExpressions = character
+            ? expressions.filter((x) => x.character_id === character.id)
+            : []
           const se = sd.se_id ? sounds.find((s) => s.id === sd.se_id) ?? null : null
           const seVolume = typeof sd.se_volume === 'number' ? sd.se_volume : 1
           // キャストに speaker がいればその位置を優先
@@ -130,6 +136,8 @@ export function SceneExportDialog({
               return { character: c, x: m.x, scale: m.scale, imageUrl: url }
             })
             .filter((x): x is ExportExtra => x !== null)
+          const silentDurationMs =
+            typeof d.duration_ms === 'number' && d.duration_ms > 0 ? d.duration_ms : 3000
           return {
             text: d.text,
             character,
@@ -145,6 +153,7 @@ export function SceneExportDialog({
             characterX,
             characterScale,
             extras,
+            silentDurationMs,
           } as ResolvedDialogue
         })
         .filter((x): x is ResolvedDialogue => x !== null)
@@ -218,15 +227,17 @@ export function SceneExportDialog({
     }
 
     let imgUrl: string | null = null
-    // 瞬き中はすべてに優先して差し替え(パッと閉じてパッと開く)
-    if (blinking && current.blink) {
-      imgUrl = current.blink.image_url
-    } else if (current.override) {
-      imgUrl = current.override.image_url
-    } else if (current.mouthOpen && current.mouthClosed) {
-      imgUrl = (mouthOpen ? current.mouthOpen : current.mouthClosed).image_url
-    } else if (current.character.image_url) {
-      imgUrl = current.character.image_url
+    if (current.character) {
+      // 瞬き中はすべてに優先して差し替え(パッと閉じてパッと開く)
+      if (blinking && current.blink) {
+        imgUrl = current.blink.image_url
+      } else if (current.override) {
+        imgUrl = current.override.image_url
+      } else if (current.mouthOpen && current.mouthClosed) {
+        imgUrl = (mouthOpen ? current.mouthOpen : current.mouthClosed).image_url
+      } else if (current.character.image_url) {
+        imgUrl = current.character.image_url
+      }
     }
 
     if (imgUrl) {
@@ -318,7 +329,7 @@ export function SceneExportDialog({
     const imageCache = new Map<string, HTMLImageElement>()
     const urls = new Set<string>()
     queue.forEach((q) => {
-      if (q.character.image_url) urls.add(q.character.image_url)
+      if (q.character?.image_url) urls.add(q.character.image_url)
       if (q.mouthOpen) urls.add(q.mouthOpen.image_url)
       if (q.mouthClosed) urls.add(q.mouthClosed.image_url)
       if (q.blink) urls.add(q.blink.image_url)
@@ -416,25 +427,6 @@ export function SceneExportDialog({
         setProgressIndex(i)
         const current = queue[i]
 
-        const audioEl = new Audio()
-        audioEl.src = current.audio.file_url
-        audioEl.preload = 'auto'
-
-        await new Promise<void>((resolve, reject) => {
-          const onReady = () => resolve()
-          const onErr = () => reject(new Error('音声の読み込みに失敗'))
-          audioEl.addEventListener('canplaythrough', onReady, { once: true })
-          audioEl.addEventListener('error', onErr, { once: true })
-          audioEl.load()
-        })
-
-        const source = audioCtx.createMediaElementSource(audioEl)
-        const analyser = audioCtx.createAnalyser()
-        analyser.fftSize = 512
-        source.connect(analyser)
-        analyser.connect(destination)
-        analyser.connect(audioCtx.destination) // プレビュー用スピーカー出力
-
         // SE: セリフ冒頭で oneshot 再生(AudioContext 経由で destination にミックス)
         let seEl: HTMLAudioElement | null = null
         let seSource: MediaElementAudioSourceNode | null = null
@@ -464,23 +456,50 @@ export function SceneExportDialog({
           }
         }
 
-        const freq = new Uint8Array(analyser.frequencyBinCount)
+        // 発話 or ナレーション音声(current.audio が null ならナレーション無音)
+        let audioEl: HTMLAudioElement | null = null
+        let source: MediaElementAudioSourceNode | null = null
+        let analyser: AnalyserNode | null = null
+        if (current.audio) {
+          audioEl = new Audio()
+          audioEl.src = current.audio.file_url
+          audioEl.preload = 'auto'
+          await new Promise<void>((resolve, reject) => {
+            const onReady = () => resolve()
+            const onErr = () => reject(new Error('音声の読み込みに失敗'))
+            audioEl!.addEventListener('canplaythrough', onReady, { once: true })
+            audioEl!.addEventListener('error', onErr, { once: true })
+            audioEl!.load()
+          })
+          source = audioCtx.createMediaElementSource(audioEl)
+          analyser = audioCtx.createAnalyser()
+          analyser.fftSize = 512
+          source.connect(analyser)
+          analyser.connect(destination)
+          analyser.connect(audioCtx.destination)
+        }
+
+        const freq = analyser ? new Uint8Array(analyser.frequencyBinCount) : null
         let mouthOpen = false
         let lastTick = performance.now()
         let raf: number | null = null
 
-        // 瞬きタイマー: 3〜5秒間隔で 80ms だけパッと閉じる
+        // 瞬きタイマー: 3〜5秒間隔で 80ms だけパッと閉じる(キャラが居るときのみ)
         let blinking = false
         let blinkEndAt = 0
         let nextBlinkAt = performance.now() + 3000 + Math.random() * 2000
 
         await new Promise<void>((resolve, reject) => {
-          audioEl.addEventListener('ended', () => resolve(), { once: true })
-          audioEl.addEventListener('error', () => reject(new Error('再生エラー')), {
-            once: true,
-          })
-          audioEl.play().catch(reject)
-          // SE はセリフとほぼ同時に鳴らす(oneshot、終了は自然停止)
+          const startAt = performance.now()
+          const silentEndAt = current.audio ? Infinity : startAt + current.silentDurationMs
+
+          if (audioEl) {
+            audioEl.addEventListener('ended', () => resolve(), { once: true })
+            audioEl.addEventListener('error', () => reject(new Error('再生エラー')), {
+              once: true,
+            })
+            audioEl.play().catch(reject)
+          }
           if (seEl) {
             seEl.currentTime = 0
             seEl.play().catch((e) => console.warn('[anime-app] se play blocked', e))
@@ -491,20 +510,26 @@ export function SceneExportDialog({
               resolve()
               return
             }
-            if (now - lastTick >= TICK_MS) {
+            // ナレーション(音声なし): 指定秒数経ったら終了
+            if (!current.audio && now >= silentEndAt) {
+              resolve()
+              return
+            }
+            if (analyser && freq && now - lastTick >= TICK_MS) {
               analyser.getByteFrequencyData(freq)
               let sum = 0
               for (let k = 0; k < freq.length; k++) sum += freq[k]
               mouthOpen = sum / freq.length > LIPSYNC_THRESHOLD
               lastTick = now
             }
-            // 瞬き状態の更新
-            if (blinking && now >= blinkEndAt) {
-              blinking = false
-              nextBlinkAt = now + 3000 + Math.random() * 2000
-            } else if (!blinking && now >= nextBlinkAt) {
-              blinking = true
-              blinkEndAt = now + 80
+            if (current.character) {
+              if (blinking && now >= blinkEndAt) {
+                blinking = false
+                nextBlinkAt = now + 3000 + Math.random() * 2000
+              } else if (!blinking && now >= nextBlinkAt) {
+                blinking = true
+                blinkEndAt = now + 80
+              }
             }
             drawFrame(ctx, current, imageCache, mouthOpen, blinking)
             raf = requestAnimationFrame(tick)
@@ -514,8 +539,8 @@ export function SceneExportDialog({
 
         if (raf !== null) cancelAnimationFrame(raf)
         try {
-          source.disconnect()
-          analyser.disconnect()
+          source?.disconnect()
+          analyser?.disconnect()
           seSource?.disconnect()
           seGain?.disconnect()
         } catch (e) {
@@ -525,7 +550,7 @@ export function SceneExportDialog({
           seEl.pause()
           seEl.src = ''
         }
-        audioEl.src = ''
+        if (audioEl) audioEl.src = ''
       }
 
       // BGMを止めて recorder 停止

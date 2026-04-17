@@ -26,6 +26,7 @@ import {
   getAllSoundEffects,
   getLayersByIllustration,
   getTelopStyle,
+  saveDialogue,
   saveScene,
   saveSceneCastMember,
   saveSceneDialogue,
@@ -68,6 +69,10 @@ export default function StoryboardPage() {
   const [exportingSceneId, setExportingSceneId] = useState<string | null>(null)
   const [telopStyle, setTelopStyle] = useState<TelopStyle>(DEFAULT_TELOP_STYLE)
   const [showTelopSettings, setShowTelopSettings] = useState(false)
+  // ナレーション追加フォーム(展開中のシーンに対して使う)
+  const [narrationText, setNarrationText] = useState('')
+  const [narrationAudioId, setNarrationAudioId] = useState('')
+  const [narrationDurationSec, setNarrationDurationSec] = useState(3)
 
   useEffect(() => {
     loadAll()
@@ -165,6 +170,54 @@ export default function StoryboardPage() {
   async function handleDeleteCastMember(memberId: string) {
     await deleteSceneCastMember(memberId)
     setCast((prev) => prev.filter((c) => c.id !== memberId))
+  }
+
+  // ナレーション(character_id=null の Dialogue)を新規作成してシーンに追加する
+  async function handleAddNarration(sceneId: string) {
+    const text = narrationText.trim()
+    if (!text) return
+    const now = new Date().toISOString()
+    const audioId = narrationAudioId || null
+    const newDialogue: Dialogue = {
+      id: crypto.randomUUID(),
+      text,
+      character_id: null,
+      audio_id: audioId,
+      expression_id: null,
+      emotion: null,
+      notes: 'narration',
+      duration_ms: audioId ? null : Math.max(500, narrationDurationSec * 1000),
+      created_at: now,
+      updated_at: now,
+    }
+    await saveDialogue(newDialogue)
+
+    const targetScene = scenes.find((s) => s.id === sceneId)
+    const maxOrder =
+      targetScene?.dialogues.reduce((m, sd) => Math.max(m, sd.order_index), -1) ?? -1
+    const newSd: SceneDialogue = {
+      id: crypto.randomUUID(),
+      scene_id: sceneId,
+      dialogue_id: newDialogue.id,
+      order_index: maxOrder + 1,
+      se_id: null,
+      se_volume: 1,
+      character_x: 0.5,
+      character_scale: 1.0,
+      created_at: now,
+    }
+    await saveSceneDialogue(newSd)
+
+    setDialogues((prev) => [newDialogue, ...prev])
+    setScenes((prev) =>
+      prev.map((s) =>
+        s.id === sceneId
+          ? { ...s, dialogues: [...s.dialogues, { ...newSd, dialogue: newDialogue }] }
+          : s,
+      ),
+    )
+    setNarrationText('')
+    setNarrationAudioId('')
   }
 
   function backgroundLayersForScene(scene: Scene): Layer[] {
@@ -697,6 +750,7 @@ export default function StoryboardPage() {
                               {scene.dialogues && scene.dialogues.length > 0 ? (
                                 <div className="space-y-2">
                                   {scene.dialogues.map((sd) => {
+                                    const isNarration = !sd.dialogue?.character_id
                                     const seVol = typeof sd.se_volume === 'number' ? sd.se_volume : 1
                                     const cx = typeof sd.character_x === 'number' ? sd.character_x : 0.5
                                     const cs = typeof sd.character_scale === 'number' ? sd.character_scale : 1.0
@@ -767,6 +821,7 @@ export default function StoryboardPage() {
                                             </>
                                           )}
                                         </div>
+                                        {!isNarration && (
                                         <div className="flex items-center gap-2 flex-wrap">
                                           <span className="text-xs text-muted-foreground flex-shrink-0">立ち位置</span>
                                           <div className="flex gap-1">
@@ -836,6 +891,7 @@ export default function StoryboardPage() {
                                             </button>
                                           </div>
                                         </div>
+                                        )}
                                       </div>
                                     )
                                   })}
@@ -851,11 +907,13 @@ export default function StoryboardPage() {
                                   className="flex-1 px-2 py-1 bg-background border border-input rounded text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                                 >
                                   <option value="">セリフを選択...</option>
-                                  {dialogues.map((d) => (
-                                    <option key={d.id} value={d.id}>
-                                      {d.text.substring(0, 30)}...
-                                    </option>
-                                  ))}
+                                  {dialogues
+                                    .filter((d) => d.character_id)
+                                    .map((d) => (
+                                      <option key={d.id} value={d.id}>
+                                        {d.text.substring(0, 30)}...
+                                      </option>
+                                    ))}
                                 </select>
                                 <Button
                                   size="sm"
@@ -868,6 +926,62 @@ export default function StoryboardPage() {
                                 >
                                   追加
                                 </Button>
+                              </div>
+                              {/* ナレーション追加(キャラなし字幕) */}
+                              <div className="space-y-2 p-2 bg-background rounded border border-dashed border-border">
+                                <p className="text-xs text-muted-foreground">
+                                  ナレーション(キャラなし字幕)を追加
+                                </p>
+                                <textarea
+                                  placeholder="ナレーションのテキスト..."
+                                  value={narrationText}
+                                  onChange={(e) => setNarrationText(e.target.value)}
+                                  rows={2}
+                                  className="w-full px-2 py-1 bg-card border border-input rounded text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                />
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-xs text-muted-foreground flex-shrink-0">
+                                    音声
+                                  </span>
+                                  <select
+                                    value={narrationAudioId}
+                                    onChange={(e) => setNarrationAudioId(e.target.value)}
+                                    className="flex-1 min-w-[120px] px-2 py-1 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                  >
+                                    <option value="">なし(無音)</option>
+                                    {audioFiles.map((a) => (
+                                      <option key={a.id} value={a.id}>
+                                        {a.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {!narrationAudioId && (
+                                    <>
+                                      <span className="text-xs text-muted-foreground flex-shrink-0">
+                                        表示秒
+                                      </span>
+                                      <input
+                                        type="number"
+                                        min={0.5}
+                                        max={30}
+                                        step={0.5}
+                                        value={narrationDurationSec}
+                                        onChange={(e) =>
+                                          setNarrationDurationSec(Number(e.target.value) || 3)
+                                        }
+                                        className="w-16 px-2 py-1 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                      />
+                                    </>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleAddNarration(scene.id)}
+                                    disabled={!narrationText.trim()}
+                                    className="ml-auto"
+                                  >
+                                    追加
+                                  </Button>
+                                </div>
                               </div>
                             </div>
                           )}
@@ -1012,6 +1126,8 @@ interface SceneDialogueResolved {
   characterX: number
   characterScale: number
   extras: StageExtraResolved[]
+  // ナレーション(無音)用の表示時間 ms。audio がある場合は無視される
+  silentDurationMs: number
 }
 
 interface StageExtraResolved {
@@ -1087,7 +1203,7 @@ function ScenePlayerDialog({
 
   if (!scene) return null
 
-  // 音声のあるセリフだけを再生対象にする
+  // キャラ+音声が揃っているセリフ、またはナレーション(キャラなし、テキストあり)を再生対象にする
   const queue: SceneDialogueResolved[] = scene.dialogues
     .map((sd) => {
       const d = sd.dialogue
@@ -1122,6 +1238,8 @@ function ScenePlayerDialog({
           }
         })
         .filter((x): x is StageExtraResolved => x !== null)
+      const silentDurationMs =
+        typeof d.duration_ms === 'number' && d.duration_ms > 0 ? d.duration_ms : 3000
       return {
         text: d.text,
         character,
@@ -1133,9 +1251,16 @@ function ScenePlayerDialog({
         characterX,
         characterScale,
         extras,
+        silentDurationMs,
       } satisfies SceneDialogueResolved
     })
-    .filter((x): x is SceneDialogueResolved => x !== null && x.audio !== null && x.character !== null)
+    // 採用ルール: (キャラ+音声) or (テキストあり= ナレーション)
+    .filter((x): x is SceneDialogueResolved => {
+      if (x === null) return false
+      if (x.character && x.audio) return true
+      if (x.text.trim().length > 0) return true // ナレーション(音声有無どちらでもOK)
+      return false
+    })
 
   const current = queue[index] ?? null
   const hasNext = index + 1 < queue.length
@@ -1190,6 +1315,7 @@ function ScenePlayerDialog({
                 characterX={current?.characterX ?? 0.5}
                 characterScale={current?.characterScale ?? 1.0}
                 extraCharacters={current?.extras ?? []}
+                silentDurationMs={current?.silentDurationMs ?? 3000}
                 playing={playing}
                 onEnded={handleEnded}
               />
