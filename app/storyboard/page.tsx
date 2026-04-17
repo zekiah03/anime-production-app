@@ -175,6 +175,35 @@ export default function StoryboardPage() {
     loadAll()
   }, [])
 
+  // 7 日ごとに「zip でバックアップしませんか?」を提案するトースト。
+  // localStorage に最終バックアップ提案日時を保存し、7 日経過 & データが 1 シーン以上あるときのみ出す。
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const key = 'anime-app-last-backup-nudge'
+    const last = localStorage.getItem(key)
+    const now = Date.now()
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000
+    if (last && now - Number(last) < sevenDaysMs) return
+    // データが薄いうちはノイジーなので、シーン数 5 件以上でのみ案内
+    if (scenes.length < 5) return
+    const timer = window.setTimeout(() => {
+      toast.push({
+        kind: 'info',
+        text: '最終バックアップから時間が経っています。zip でエクスポートしておくと安心です',
+        durationMs: 12000,
+        action: {
+          label: 'エクスポート',
+          onClick: () => {
+            window.location.href = '/'
+          },
+        },
+      })
+      localStorage.setItem(key, String(now))
+    }, 5000)
+    return () => window.clearTimeout(timer)
+    // scenes の長さが変わるたびに再評価(初回ロード後と整合性修復後に効く)
+  }, [scenes.length, toast])
+
   // ダークモード初期化: localStorage 優先、なければ prefers-color-scheme
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -283,8 +312,47 @@ export default function StoryboardPage() {
       setCastPresets(loadedPresets)
       // デフォルト選択: 先頭の動画
       setSelectedVideoId((prev) => prev ?? workingVideos[0]?.id ?? null)
+
+      // 起動時データ整合性チェック: 孤児参照を検出。見つかれば通知だけ出して、
+      // ユーザーがボタンを押したときだけ修復(勝手に壊れた状態を書き換えない)。
+      try {
+        const { checkIntegrity, applyIntegrityRepair } = await import(
+          '@/lib/integrity-check'
+        )
+        const report = checkIntegrity({
+          scenes: workingScenes,
+          dialogues: allDialogues,
+          sceneDialogues,
+          sceneCast: allCast,
+          characters: allCharacters,
+          expressions: allExpressions,
+          audioFiles: allAudio,
+          illustrations: illusts,
+          bgmTracks: allBgm,
+          sounds: allSe,
+          videos: workingVideos,
+        })
+        if (report.total > 0) {
+          toast.push({
+            kind: 'warning',
+            text: `データ整合性警告: 壊れた参照が ${report.total} 件見つかりました。修復しますか?`,
+            durationMs: 15000,
+            action: {
+              label: '修復',
+              onClick: async () => {
+                const fixed = await applyIntegrityRepair(report)
+                toast.success(`${fixed} 件の参照を修復しました。再読み込みします`)
+                setTimeout(() => loadAll(), 800)
+              },
+            },
+          })
+        }
+      } catch (e) {
+        console.warn('[anime-app] integrity check failed', e)
+      }
     } catch (e) {
       console.error('[anime-app] load storyboard failed', e)
+      toast.error('データの読み込みに失敗しました')
     } finally {
       setLoading(false)
     }

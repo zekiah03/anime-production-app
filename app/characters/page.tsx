@@ -112,6 +112,12 @@ export default function CharactersPage() {
 
   async function handleDelete(id: string) {
     if (!confirm('削除してよろしいですか？関連する表情も削除されます')) return
+    // 削除前にメモリ上の blob: URL を revoke(IndexedDB の blob は削除で回収されるが、
+    // object URL 自体は明示 revoke しないとブラウザが参照を保持してメモリリークになる)
+    const target = characters.find((c) => c.id === id)
+    if (target?.image_url && target.image_url.startsWith('blob:')) {
+      URL.revokeObjectURL(target.image_url)
+    }
     await deleteCharacter(id)
     setCharacters((prev) => prev.filter((c) => c.id !== id))
   }
@@ -368,6 +374,10 @@ function CharacterDetailDialog({
 
   async function handleDeleteExpression(id: string) {
     if (!confirm('この表情を削除しますか？')) return
+    const target = expressions.find((e) => e.id === id)
+    if (target?.image_url && target.image_url.startsWith('blob:')) {
+      URL.revokeObjectURL(target.image_url)
+    }
     await deleteExpression(id)
     setExpressions((prev) => prev.filter((e) => e.id !== id))
   }
