@@ -10,7 +10,7 @@ import { SceneExportDialog } from '@/components/scene-export-dialog'
 import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
 import { SceneTimelineBar, type TimelineClip } from '@/components/scene-timeline'
 import { VideoExportDialog } from '@/components/video-export-dialog'
-import { SceneThumbnail } from '@/components/scene-thumbnail'
+import { SceneThumbnail, renderSceneFrame } from '@/components/scene-thumbnail'
 import { charColorHsl } from '@/lib/char-color'
 import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
@@ -135,6 +135,10 @@ export default function StoryboardPage() {
   // 全データリセット確認
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [resetInput, setResetInput] = useState('')
+  // 展開シーン内のセリフドラッグ中 id(D&D並び替え用)
+  const [draggedSdId, setDraggedSdId] = useState<string | null>(null)
+  // 複数セリフ選択(複数シーンをまたぐ)。scene_dialogue.id の集合
+  const [checkedSdIds, setCheckedSdIds] = useState<Set<string>>(new Set())
   // セリフクリップボード(コピー元シーン id + 生スナップショット)
   const [dialogueClipboard, setDialogueClipboard] = useState<
     | {
@@ -1563,6 +1567,7 @@ export default function StoryboardPage() {
         SceneDialogue,
         | 'se_id'
         | 'se_volume'
+        | 'voice_volume'
         | 'character_x'
         | 'character_scale'
         | 'character_flipped'
@@ -1589,6 +1594,8 @@ export default function StoryboardPage() {
               order_index: rowPart.order_index,
               se_id: rowPart.se_id ?? null,
               se_volume: typeof rowPart.se_volume === 'number' ? rowPart.se_volume : 1,
+              voice_volume:
+                typeof rowPart.voice_volume === 'number' ? rowPart.voice_volume : 1,
               character_x:
                 typeof rowPart.character_x === 'number' ? rowPart.character_x : 0.5,
               character_scale:
@@ -1665,6 +1672,78 @@ export default function StoryboardPage() {
         orderMap.has(s.id) ? { ...s, order_index: orderMap.get(s.id) as number } : s,
       )
     })
+  }
+
+  // 選択中セリフを一括削除(SceneDialogue のみ削除、Dialogue 本体は残す)
+  async function handleBulkDeleteDialogues() {
+    const ids = Array.from(checkedSdIds)
+    if (ids.length === 0) return
+    if (!window.confirm(`選択中の ${ids.length} セリフをシーンから外しますか?`)) return
+    for (const id of ids) {
+      await deleteSceneDialogue(id)
+    }
+    setScenes((prev) =>
+      prev.map((s) => ({
+        ...s,
+        dialogues: s.dialogues.filter((sd) => !checkedSdIds.has(sd.id)),
+      })),
+    )
+    setCheckedSdIds(new Set())
+  }
+
+  // 選択中セリフを別シーンの末尾に移動
+  async function handleBulkMoveDialogues(targetSceneId: string) {
+    const ids = Array.from(checkedSdIds)
+    if (ids.length === 0) return
+    const target = scenes.find((s) => s.id === targetSceneId)
+    if (!target) return
+    const now = new Date().toISOString()
+    let order = target.dialogues.reduce((m, sd) => Math.max(m, sd.order_index), -1)
+    const moved: { oldSceneId: string; sd: SceneDialogue & { dialogue: Dialogue | null } }[] = []
+    for (const id of ids) {
+      // 元シーンから検索
+      let oldSceneId = ''
+      let source: (SceneDialogue & { dialogue: Dialogue | null }) | null = null
+      for (const s of scenes) {
+        const found = s.dialogues.find((x) => x.id === id)
+        if (found) {
+          oldSceneId = s.id
+          source = found
+          break
+        }
+      }
+      if (!source) continue
+      order += 1
+      const updated = { ...source, scene_id: targetSceneId, order_index: order }
+      const { dialogue: _d, ...row } = updated
+      void _d
+      await saveSceneDialogue(row as SceneDialogue)
+      moved.push({ oldSceneId, sd: updated })
+    }
+    setScenes((prev) =>
+      prev.map((s) => {
+        // 元シーンから除去
+        if (moved.some((m) => m.oldSceneId === s.id)) {
+          return {
+            ...s,
+            dialogues: s.dialogues.filter(
+              (sd) => !moved.some((m) => m.sd.id === sd.id),
+            ),
+            updated_at: now,
+          }
+        }
+        // 移動先に追加
+        if (s.id === targetSceneId) {
+          return {
+            ...s,
+            dialogues: [...s.dialogues, ...moved.map((m) => m.sd)],
+            updated_at: now,
+          }
+        }
+        return s
+      }),
+    )
+    setCheckedSdIds(new Set())
   }
 
   // シーン内の全セリフをクリップボードにコピー(Dialogue は複製するので元データは不変)
@@ -3177,6 +3256,9 @@ export default function StoryboardPage() {
                                     .map((sd) => {
                                     const isNarration = !sd.dialogue?.character_id
                                     const seVol = typeof sd.se_volume === 'number' ? sd.se_volume : 1
+                                    const voiceVol =
+                                      typeof sd.voice_volume === 'number' ? sd.voice_volume : 1
+                                    const hasVoice = !!sd.dialogue?.audio_id
                                     const cx = typeof sd.character_x === 'number' ? sd.character_x : 0.5
                                     const cs = typeof sd.character_scale === 'number' ? sd.character_scale : 1.0
                                     const posPreset: 'left' | 'center' | 'right' =
@@ -3193,16 +3275,81 @@ export default function StoryboardPage() {
                                     const matchedBySearch =
                                       q.length > 0 &&
                                       (sd.dialogue?.text ?? '').toLowerCase().includes(q)
+                                    const isDragging = draggedSdId === sd.id
+                                    const isChecked = checkedSdIds.has(sd.id)
                                     return (
                                       <div
                                         key={sd.id}
-                                        className={`p-2 rounded text-sm space-y-2 ${
-                                          matchedBySearch
-                                            ? 'bg-primary/15 border border-primary/30'
-                                            : 'bg-background'
+                                        draggable
+                                        onDragStart={(e) => {
+                                          e.stopPropagation()
+                                          setDraggedSdId(sd.id)
+                                          try {
+                                            e.dataTransfer.effectAllowed = 'move'
+                                            e.dataTransfer.setData('text/plain', sd.id)
+                                          } catch {}
+                                        }}
+                                        onDragOver={(e) => {
+                                          if (draggedSdId && draggedSdId !== sd.id) {
+                                            e.preventDefault()
+                                            e.stopPropagation()
+                                          }
+                                        }}
+                                        onDrop={(e) => {
+                                          e.stopPropagation()
+                                          if (draggedSdId && draggedSdId !== sd.id) {
+                                            const sorted = [...scene.dialogues].sort(
+                                              (a, b) => a.order_index - b.order_index,
+                                            )
+                                            const fromIdx = sorted.findIndex(
+                                              (x) => x.id === draggedSdId,
+                                            )
+                                            const toIdx = sorted.findIndex(
+                                              (x) => x.id === sd.id,
+                                            )
+                                            if (fromIdx !== -1 && toIdx !== -1) {
+                                              handleReorderDialogues(scene.id, fromIdx, toIdx)
+                                            }
+                                          }
+                                          setDraggedSdId(null)
+                                        }}
+                                        onDragEnd={() => setDraggedSdId(null)}
+                                        className={`p-2 rounded text-sm space-y-2 cursor-move transition ${
+                                          isDragging ? 'opacity-40' : ''
+                                        } ${
+                                          isChecked
+                                            ? 'bg-primary/15 ring-1 ring-primary/40'
+                                            : matchedBySearch
+                                              ? 'bg-primary/15 border border-primary/30'
+                                              : 'bg-background'
                                         }`}
                                         onClick={(e) => e.stopPropagation()}
                                       >
+                                        <div className="flex items-center gap-2 -mt-1">
+                                          <label
+                                            className="flex items-center gap-1 cursor-pointer"
+                                            onClick={(e) => e.stopPropagation()}
+                                            title="一括操作用の選択"
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              checked={isChecked}
+                                              onChange={() => {
+                                                setCheckedSdIds((prev) => {
+                                                  const next = new Set(prev)
+                                                  if (next.has(sd.id)) next.delete(sd.id)
+                                                  else next.add(sd.id)
+                                                  return next
+                                                })
+                                              }}
+                                              className="w-3 h-3 accent-primary"
+                                            />
+                                          </label>
+                                          <GripVertical
+                                            size={12}
+                                            className="text-muted-foreground flex-shrink-0"
+                                          />
+                                        </div>
                                         <div className="flex items-start justify-between gap-2">
                                           <div className="flex-1 min-w-0 space-y-1">
                                             <div className="flex items-center gap-2 flex-wrap">
@@ -3305,6 +3452,30 @@ export default function StoryboardPage() {
                                             </button>
                                           </div>
                                         </div>
+                                        {hasVoice && (
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-xs text-muted-foreground flex-shrink-0 w-14">
+                                              声の音量
+                                            </span>
+                                            <input
+                                              type="range"
+                                              min={0}
+                                              max={1}
+                                              step={0.05}
+                                              value={voiceVol}
+                                              onChange={(e) =>
+                                                updateSceneDialogueMeta(scene.id, sd.id, {
+                                                  voice_volume: Number(e.target.value),
+                                                })
+                                              }
+                                              className="flex-1 accent-primary"
+                                              title="このセリフのキャラ音声の音量"
+                                            />
+                                            <span className="text-xs text-muted-foreground w-10 tabular-nums text-right flex-shrink-0">
+                                              {Math.round(voiceVol * 100)}%
+                                            </span>
+                                          </div>
+                                        )}
                                         <div className="flex items-center gap-2">
                                           <span className="text-xs text-muted-foreground flex-shrink-0">SE</span>
                                           <select
@@ -4050,6 +4221,51 @@ export default function StoryboardPage() {
         </div>
       </main>
 
+      {/* 複数セリフ選択中のフローティング操作バー */}
+      {checkedSdIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-card border border-primary/40 rounded-lg shadow-xl p-3 flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium text-foreground">
+            {checkedSdIds.size} セリフ選択中
+          </span>
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value) {
+                handleBulkMoveDialogues(e.target.value)
+                e.target.value = ''
+              }
+            }}
+            className="px-2 py-1 bg-background border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          >
+            <option value="">別シーンへ移動…</option>
+            {scenes
+              .filter((s) => (s.video_id ?? null) === selectedVideoId)
+              .sort((a, b) => a.order_index - b.order_index)
+              .map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.title ?? '(無題)'}
+                </option>
+              ))}
+          </select>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleBulkDeleteDialogues}
+            className="h-8 px-2 text-xs text-destructive border-destructive/40 hover:bg-destructive/20"
+          >
+            <Trash2 size={12} />
+            削除
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setCheckedSdIds(new Set())}
+            className="h-8 px-2 text-xs"
+          >
+            選択解除
+          </Button>
+        </div>
+      )}
       {/* Undo トースト: 削除直後に右下に出現し、8秒後に自動消去 */}
       {undoToast && (
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-foreground text-background px-4 py-3 rounded-lg shadow-lg border border-border max-w-sm">
@@ -4090,6 +4306,7 @@ export default function StoryboardPage() {
               sounds={sounds}
               telopStyle={telopStyle}
               sceneCast={playScene ? castForScene(playScene.id) : []}
+              illustrations={illustrations}
               onClose={() => setPlayingSceneId(null)}
             />
             {/* 動画連続再生: playingVideoId が立ってる間、対象シーンを順に再生 */}
@@ -4122,6 +4339,7 @@ export default function StoryboardPage() {
                   sounds={sounds}
                   telopStyle={telopStyle}
                   sceneCast={castForScene(currentScene.id)}
+                  illustrations={illustrations}
                   autoPlay
                   title={`${videoName}(通し再生)— ${playingVideoSceneIdx + 1}/${orderedScenes.length} ${currentScene.title}`}
                   onQueueEnd={() => {
@@ -4162,6 +4380,7 @@ export default function StoryboardPage() {
                   sounds={sounds}
                   telopStyle={telopStyle}
                   sceneCast={previewScene ? castForScene(previewScene.id) : []}
+                  illustrations={illustrations}
                   startAtSdId={previewingSdId}
                   singleMode
                   onClose={() => setPreviewingSdId(null)}
@@ -4711,6 +4930,7 @@ interface SceneDialogueResolved {
   charExpressions: CharacterExpression[]
   se: SoundEffect | null
   seVolume: number
+  voiceVolume: number
   characterX: number
   characterScale: number
   characterFlipped: boolean
@@ -4743,6 +4963,7 @@ function ScenePlayerDialog({
   sounds,
   telopStyle,
   sceneCast,
+  illustrations,
   startAtSdId,
   singleMode,
   autoPlay,
@@ -4760,6 +4981,7 @@ function ScenePlayerDialog({
   sounds: SoundEffect[]
   telopStyle: TelopStyle
   sceneCast: SceneCastMember[]
+  illustrations: IllustrationWithLayers[] // PNG スナップショット用
   startAtSdId?: string | null // この SceneDialogue から再生を開始
   singleMode?: boolean // true のとき 1 セリフだけ再生して停止(プレビュー用)
   autoPlay?: boolean // ダイアログ表示と同時に再生開始(連続再生用)
@@ -4825,6 +5047,7 @@ function ScenePlayerDialog({
         : []
       const se = sd.se_id ? sounds.find((s) => s.id === sd.se_id) ?? null : null
       const seVolume = typeof sd.se_volume === 'number' ? sd.se_volume : 1
+      const voiceVolume = typeof sd.voice_volume === 'number' ? sd.voice_volume : 1
       // キャストに発話者がいればその座標を優先、無ければ A2 のセリフ設定
       const speakerCast = sceneCast.find((m) => m.character_id === d.character_id)
       const characterX =
@@ -4871,6 +5094,7 @@ function ScenePlayerDialog({
         charExpressions,
         se,
         seVolume,
+        voiceVolume,
         characterX,
         characterScale,
         characterFlipped,
@@ -4998,6 +5222,7 @@ function ScenePlayerDialog({
                 extraCharacters={current?.extras ?? []}
                 silentDurationMs={current?.silentDurationMs ?? 3000}
                 playbackRate={playbackRate}
+                audioVolume={current?.voiceVolume ?? 1}
                 playing={playing}
                 onEnded={handleEnded}
               />
@@ -5034,6 +5259,35 @@ function ScenePlayerDialog({
               <Button size="sm" variant="outline" onClick={handleSkip} disabled={!playing} className="gap-1">
                 <SkipForward size={14} /> 次へ
               </Button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!scene || !current) return
+                  const url = await renderSceneFrame(
+                    scene,
+                    { characters, audioFiles, expressions, illustrations, sceneCast },
+                    {
+                      width: 1920,
+                      height: 1080,
+                      targetSdId: current.sdId,
+                      format: 'image/png',
+                      overlay: false,
+                    },
+                  )
+                  if (!url) return
+                  const a = document.createElement('a')
+                  a.href = url
+                  const safeTitle = (scene.title ?? 'scene').replace(/[^\w一-龠ぁ-んァ-ヶ]+/g, '_')
+                  a.download = `${safeTitle}_${index + 1}.png`
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                }}
+                className="ml-2 px-2 py-1 text-xs rounded border border-input text-foreground hover:bg-primary/10 transition"
+                title="現在のフレームを 1920x1080 の PNG で保存"
+              >
+                PNG保存
+              </button>
               {bgmTrack && (
                 <button
                   type="button"

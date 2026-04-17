@@ -133,6 +133,8 @@ export interface SceneDialogue {
   // 各セリフの冒頭で鳴らす効果音(SE)。未指定ならなし
   se_id: string | null
   se_volume: number // 0..1(未指定なら 1.0 を既定にする)
+  // キャラ音声(Dialogue.audio_id)の個別音量 0..1。未指定なら 1.0
+  voice_volume?: number
   // キャラクターの立ち位置(0..1, 0.5=中央) と スケール(1.0=縦いっぱい)
   character_x: number
   character_scale: number

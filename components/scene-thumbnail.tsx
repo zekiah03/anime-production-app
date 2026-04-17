@@ -55,7 +55,11 @@ function backgroundLayersForScene(
     .sort((a, b) => a.order_index - b.order_index)
 }
 
-async function renderThumbnail(
+/**
+ * 指定されたシーンの特定セリフ(未指定なら先頭の有効セリフ)を静止画 1 枚として描画する。
+ * 返り値は dataUrl (format 指定可能)。サムネイル兼フレームスナップショット用。
+ */
+export async function renderSceneFrame(
   scene: SceneWithDialogues,
   data: {
     characters: Character[]
@@ -64,35 +68,48 @@ async function renderThumbnail(
     illustrations: IllustrationWithLayers[]
     sceneCast: SceneCastMember[]
   },
+  opts: {
+    width?: number
+    height?: number
+    targetSdId?: string | null
+    format?: 'image/png' | 'image/jpeg'
+    quality?: number
+    overlay?: boolean
+  } = {},
 ): Promise<string | null> {
+  const W2 = opts.width ?? W
+  const H2 = opts.height ?? H
   const canvas = document.createElement('canvas')
-  canvas.width = W
-  canvas.height = H
+  canvas.width = W2
+  canvas.height = H2
   const ctx = canvas.getContext('2d')
   if (!ctx) return null
 
   // ベース塗り
   ctx.fillStyle = '#0b0b0b'
-  ctx.fillRect(0, 0, W, H)
+  ctx.fillRect(0, 0, W2, H2)
 
   // 背景
   const bgLayers = backgroundLayersForScene(scene, data.illustrations)
   for (const layer of bgLayers) {
     const bg = await loadImage(layer.image_url)
     if (!bg) continue
-    const scale = Math.max(W / bg.width, H / bg.height)
+    const scale = Math.max(W2 / bg.width, H2 / bg.height)
     const w = bg.width * scale
     const h = bg.height * scale
-    const x = (W - w) / 2
-    const y = (H - h) / 2
+    const x = (W2 - w) / 2
+    const y = (H2 - h) / 2
     const prev = ctx.globalAlpha
     ctx.globalAlpha = layer.opacity
     ctx.drawImage(bg, x, y, w, h)
     ctx.globalAlpha = prev
   }
 
-  // 先頭セリフを基準にキャラ表示
-  const firstValid = scene.dialogues.find((sd) => {
+  // 対象セリフ: targetSdId があればそれ、無ければ最初の有効セリフ
+  const targetSd = opts.targetSdId
+    ? scene.dialogues.find((sd) => sd.id === opts.targetSdId)
+    : undefined
+  const firstValid = targetSd ?? scene.dialogues.find((sd) => {
     const d = sd.dialogue
     if (!d) return false
     const character = data.characters.find((c) => c.id === d.character_id) ?? null
@@ -112,14 +129,14 @@ async function renderThumbnail(
     if (!url) continue
     const img = await loadImage(url)
     if (!img) continue
-    const fit = Math.min(W / img.width, H / img.height)
+    const fit = Math.min(W2 / img.width, H2 / img.height)
     const baseW = img.width * fit
     const baseH = img.height * fit
     const w = baseW * ex.scale
     const h = baseH * ex.scale
-    const cx = W * ex.x
+    const cx = W2 * ex.x
     const x = cx - w / 2
-    const y = H - h
+    const y = H2 - h
     if (ex.flipped) {
       ctx.save()
       ctx.translate(cx, 0)
@@ -143,7 +160,7 @@ async function renderThumbnail(
     if (imgUrl) {
       const img = await loadImage(imgUrl)
       if (img) {
-        const fit = Math.min(W / img.width, H / img.height)
+        const fit = Math.min(W2 / img.width, H2 / img.height)
         const baseW = img.width * fit
         const baseH = img.height * fit
         const sd = firstValid
@@ -159,9 +176,9 @@ async function renderThumbnail(
             : !!sd.character_flipped
         const w = baseW * scale
         const h = baseH * scale
-        const cx = W * x01
+        const cx = W2 * x01
         const x = cx - w / 2
-        const y = H - h
+        const y = H2 - h
         if (flipped) {
           ctx.save()
           ctx.translate(cx, 0)
@@ -175,14 +192,18 @@ async function renderThumbnail(
     }
   }
 
-  // 軽いグラデオーバーレイ(サムネとしての見やすさ)
-  const grad = ctx.createLinearGradient(0, H - 40, 0, H)
-  grad.addColorStop(0, 'rgba(0,0,0,0)')
-  grad.addColorStop(1, 'rgba(0,0,0,0.45)')
-  ctx.fillStyle = grad
-  ctx.fillRect(0, 0, W, H)
+  // サムネ用の軽いグラデオーバーレイ(opts.overlay が false ならスキップ)
+  if (opts.overlay !== false) {
+    const grad = ctx.createLinearGradient(0, H2 - 40, 0, H2)
+    grad.addColorStop(0, 'rgba(0,0,0,0)')
+    grad.addColorStop(1, 'rgba(0,0,0,0.45)')
+    ctx.fillStyle = grad
+    ctx.fillRect(0, 0, W2, H2)
+  }
 
-  return canvas.toDataURL('image/jpeg', 0.8)
+  const fmt = opts.format ?? 'image/jpeg'
+  const q = opts.quality ?? 0.8
+  return canvas.toDataURL(fmt, q)
 }
 
 export function SceneThumbnail({
@@ -236,7 +257,7 @@ export function SceneThumbnail({
     if (depsKey === lastKeyRef.current) return
     lastKeyRef.current = depsKey
     let cancelled = false
-    renderThumbnail(scene, {
+    renderSceneFrame(scene, {
       characters,
       audioFiles,
       expressions,

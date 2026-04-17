@@ -39,6 +39,8 @@ interface LipSyncStageProps {
   silentDurationMs?: number
   // 再生速度(1=等倍)。音声と無音タイマーの両方に反映。
   playbackRate?: number
+  // 音声音量 0..1 (既定 1.0)
+  audioVolume?: number
   onEnded?: () => void
   className?: string
 }
@@ -71,10 +73,12 @@ export function LipSyncStage({
   extraCharacters,
   silentDurationMs,
   playbackRate,
+  audioVolume,
   onEnded,
   className,
 }: LipSyncStageProps) {
   const rate = typeof playbackRate === 'number' && playbackRate > 0 ? playbackRate : 1
+  const vol = typeof audioVolume === 'number' ? Math.max(0, Math.min(1, audioVolume)) : 1
   const effectiveStyle = telopStyle ?? DEFAULT_TELOP_STYLE
   const cx = typeof characterX === 'number' ? characterX : 0.5
   const cs = typeof characterScale === 'number' ? characterScale : 1.0
@@ -215,6 +219,7 @@ export function LipSyncStage({
       if (cancelled || !audioRef.current) return
       audioRef.current.currentTime = 0
       audioRef.current.playbackRate = rate
+      audioRef.current.volume = vol
       try {
         await audioRef.current.play()
         lastTickRef.current = performance.now()
@@ -227,7 +232,7 @@ export function LipSyncStage({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, audioUrl, silentDurationMs, rate])
+  }, [playing, audioUrl, silentDurationMs, rate, vol])
 
   useEffect(() => {
     return () => {
