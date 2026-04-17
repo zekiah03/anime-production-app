@@ -1462,6 +1462,49 @@ export default function StoryboardPage() {
     })
   }
 
+  // シーンを同動画内で1つ上/下に移動(ドラッグ不要)
+  async function handleMoveSceneByStep(sceneId: string, step: -1 | 1) {
+    const src = scenes.find((s) => s.id === sceneId)
+    if (!src) return
+    const siblings = scenes
+      .filter((s) => (s.video_id ?? null) === (src.video_id ?? null))
+      .sort((a, b) => a.order_index - b.order_index)
+    const idx = siblings.findIndex((s) => s.id === sceneId)
+    const nextIdx = idx + step
+    if (idx === -1 || nextIdx < 0 || nextIdx >= siblings.length) return
+    await handleReorderSceneById(sceneId, siblings[nextIdx].id)
+  }
+
+  // 展開中シーンから前/次のシーンへ「展開を移す」(同動画内)
+  function jumpToAdjacentScene(currentSceneId: string, step: -1 | 1) {
+    const src = scenes.find((s) => s.id === currentSceneId)
+    if (!src) return
+    const siblings = scenes
+      .filter((s) => (s.video_id ?? null) === (src.video_id ?? null))
+      .sort((a, b) => a.order_index - b.order_index)
+    const idx = siblings.findIndex((s) => s.id === currentSceneId)
+    const target = siblings[idx + step]
+    if (target) setSelectedSceneId(target.id)
+  }
+
+  // セリフのテキストをインライン編集(Dialogue.text を直接更新)
+  async function handleEditDialogueText(dialogueId: string, text: string) {
+    const existing = dialogues.find((d) => d.id === dialogueId)
+    if (!existing) return
+    const now = new Date().toISOString()
+    const updated: Dialogue = { ...existing, text, updated_at: now }
+    await saveDialogue(updated)
+    setDialogues((prev) => prev.map((d) => (d.id === dialogueId ? updated : d)))
+    setScenes((prev) =>
+      prev.map((s) => ({
+        ...s,
+        dialogues: s.dialogues.map((sd) =>
+          sd.dialogue?.id === dialogueId ? { ...sd, dialogue: updated } : sd,
+        ),
+      })),
+    )
+  }
+
   function handleEditScene(scene: Scene) {
     setSceneFormData({
       title: scene.title || '',
@@ -2118,6 +2161,32 @@ export default function StoryboardPage() {
                               className="mt-4 pt-4 border-t border-border space-y-4"
                               onClick={(e) => e.stopPropagation()}
                             >
+                              {/* 前/次シーンナビ(allExpanded 中は並びをそのまま見られるので出さない) */}
+                              {!allExpanded && (
+                                <div className="flex items-center justify-between text-xs">
+                                  <button
+                                    type="button"
+                                    onClick={() => jumpToAdjacentScene(scene.id, -1)}
+                                    disabled={index === 0}
+                                    className="px-3 py-1 rounded border border-input text-foreground hover:bg-primary/10 disabled:opacity-30 disabled:cursor-not-allowed"
+                                    title="前のシーンに展開を移す"
+                                  >
+                                    ← 前のシーン
+                                  </button>
+                                  <span className="text-muted-foreground tabular-nums">
+                                    {index + 1} / {filteredScenes.length}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => jumpToAdjacentScene(scene.id, 1)}
+                                    disabled={index === filteredScenes.length - 1}
+                                    className="px-3 py-1 rounded border border-input text-foreground hover:bg-primary/10 disabled:opacity-30 disabled:cursor-not-allowed"
+                                    title="次のシーンに展開を移す"
+                                  >
+                                    次のシーン →
+                                  </button>
+                                </div>
+                              )}
                               {/* 縮めるボタン + 別動画への移動/コピー */}
                               <div className="flex items-center justify-between gap-2 flex-wrap">
                                 <div className="flex items-center gap-1 flex-wrap">
@@ -2430,15 +2499,30 @@ export default function StoryboardPage() {
                                         onClick={(e) => e.stopPropagation()}
                                       >
                                         <div className="flex items-start justify-between gap-2">
-                                          <div className="flex-1 min-w-0">
+                                          <div className="flex-1 min-w-0 space-y-1">
                                             {isNarration && (
-                                              <span className="inline-block text-[10px] px-1.5 py-0.5 bg-accent/20 text-accent rounded mr-2 align-middle">
+                                              <span className="inline-block text-[10px] px-1.5 py-0.5 bg-accent/20 text-accent rounded align-middle">
                                                 ナレーション
                                               </span>
                                             )}
-                                            <span className="text-foreground break-words">
-                                              {sd.dialogue?.text}
-                                            </span>
+                                            {sd.dialogue ? (
+                                              <textarea
+                                                value={sd.dialogue.text}
+                                                onChange={(e) =>
+                                                  handleEditDialogueText(
+                                                    sd.dialogue!.id,
+                                                    e.target.value,
+                                                  )
+                                                }
+                                                rows={1}
+                                                className="w-full px-2 py-1 bg-card border border-input rounded text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-y min-h-[32px]"
+                                                title="セリフテキストを直接編集"
+                                              />
+                                            ) : (
+                                              <span className="text-muted-foreground">
+                                                (セリフ未解決)
+                                              </span>
+                                            )}
                                           </div>
                                           <div className="flex items-center gap-1 flex-shrink-0">
                                             <button
@@ -2793,6 +2877,28 @@ export default function StoryboardPage() {
                           )}
                         </div>
                         <div className="flex gap-2 flex-shrink-0">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleMoveSceneByStep(scene.id, -1)
+                            }}
+                            disabled={index === 0}
+                            className="p-2 hover:bg-primary/20 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="上へ移動"
+                          >
+                            <ChevronUp size={14} className="text-muted-foreground" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleMoveSceneByStep(scene.id, 1)
+                            }}
+                            disabled={index === filteredScenes.length - 1}
+                            className="p-2 hover:bg-primary/20 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="下へ移動"
+                          >
+                            <ChevronDown size={14} className="text-muted-foreground" />
+                          </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation()
