@@ -11,6 +11,8 @@ import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
 import { SceneTimelineBar, type TimelineClip } from '@/components/scene-timeline'
 import { VideoExportDialog } from '@/components/video-export-dialog'
 import { SceneThumbnail, renderSceneFrame } from '@/components/scene-thumbnail'
+import { useToast } from '@/components/toast'
+import { useSaveStatus, SaveStatusBadge } from '@/components/save-status'
 import { charColorHsl } from '@/lib/char-color'
 import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
@@ -58,6 +60,8 @@ import {
 } from '@/components/ui/dialog'
 
 export default function StoryboardPage() {
+  const toast = useToast()
+  const save = useSaveStatus()
   const [scenes, setScenes] = useState<SceneWithDialogues[]>([])
   const [dialogues, setDialogues] = useState<Dialogue[]>([])
   const [characters, setCharacters] = useState<Character[]>([])
@@ -110,16 +114,6 @@ export default function StoryboardPage() {
   // スクリプト一括貼り付け(テキスト → 複数セリフ)
   const [bulkScriptSceneId, setBulkScriptSceneId] = useState<string | null>(null)
   const [bulkScriptText, setBulkScriptText] = useState('')
-  // 削除 Undo トースト: 削除直後に復元できるよう、削除されたシーン群のスナップショットを保持
-  const [undoToast, setUndoToast] = useState<{
-    message: string
-    expiresAt: number
-    snapshots: {
-      scene: Scene
-      sceneDialogues: SceneDialogue[]
-      castMembers: SceneCastMember[]
-    }[]
-  } | null>(null)
   // キャラ一括置換ダイアログ
   const [showCharReplace, setShowCharReplace] = useState(false)
   const [charReplaceFrom, setCharReplaceFrom] = useState('')
@@ -812,7 +806,7 @@ export default function StoryboardPage() {
       updated.push(u)
     }
     if (updated.length === 0) {
-      alert('このシーンには倍率調整できる(音声なしの)セリフがありません')
+      toast.warning('このシーンには倍率調整できる(音声なしの)セリフがありません')
       return
     }
     const map = new Map(updated.map((d) => [d.id, d]))
@@ -842,7 +836,7 @@ export default function StoryboardPage() {
   async function handleSaveCastPreset(sceneId: string) {
     const members = castForScene(sceneId)
     if (members.length === 0) {
-      alert('保存できる登場キャラがいません')
+      toast.warning('保存できる登場キャラがいません')
       return
     }
     const name = window.prompt('プリセット名を入力してください', `プリセット${castPresets.length + 1}`)
@@ -922,7 +916,7 @@ export default function StoryboardPage() {
   async function handleBulkMerge() {
     const ids = Array.from(checkedSceneIds)
     if (ids.length < 2) {
-      alert('2シーン以上を選択してください')
+      toast.warning('2シーン以上を選択してください')
       return
     }
     const targets = scenes
@@ -1004,15 +998,39 @@ export default function StoryboardPage() {
     if (ids.length === 0) return
     if (!window.confirm(`選択中の ${ids.length} シーンを削除しますか?`)) return
     const snapshots = snapshotScenes(ids)
-    for (const id of ids) await deleteScene(id)
+    for (const id of ids) await save.track(deleteScene(id))
     setScenes((prev) => prev.filter((s) => !checkedSceneIds.has(s.id)))
     setCast((prev) => prev.filter((c) => !checkedSceneIds.has(c.scene_id)))
     if (selectedSceneId && checkedSceneIds.has(selectedSceneId)) setSelectedSceneId(null)
     clearChecked()
-    setUndoToast({
-      message: `${snapshots.length} シーンを削除`,
-      expiresAt: Date.now() + 8000,
-      snapshots,
+    toast.push({
+      kind: 'info',
+      text: `${snapshots.length} シーンを削除しました`,
+      durationMs: 8000,
+      action: {
+        label: '元に戻す',
+        onClick: async () => {
+          for (const snap of snapshots) {
+            await save.track(saveScene(snap.scene))
+            for (const sd of snap.sceneDialogues) {
+              await save.track(saveSceneDialogue(sd))
+            }
+            for (const c of snap.castMembers) {
+              await save.track(saveSceneCastMember(c))
+            }
+          }
+          const restored: SceneWithDialogues[] = snapshots.map((snap) => ({
+            ...snap.scene,
+            dialogues: snap.sceneDialogues.map((sd) => ({
+              ...sd,
+              dialogue: dialogues.find((d) => d.id === sd.dialogue_id) ?? null,
+            })),
+          }))
+          setScenes((prev) => [...prev, ...restored])
+          setCast((prev) => [...prev, ...snapshots.flatMap((s) => s.castMembers)])
+          toast.success('削除を取り消しました')
+        },
+      },
     })
   }
 
@@ -1038,7 +1056,7 @@ export default function StoryboardPage() {
   async function handleReplaceAll() {
     const q = searchQuery.trim()
     if (!q) {
-      alert('検索文字列を入力してください')
+      toast.warning('検索文字列を入力してください')
       return
     }
     if (!window.confirm(`この動画内のセリフに含まれる「${q}」を「${replaceQuery}」に置き換えます。続けますか?`)) return
@@ -1051,7 +1069,7 @@ export default function StoryboardPage() {
       }
     }
     if (affectedDialogueIds.size === 0) {
-      alert('該当するセリフが見つかりませんでした')
+      toast.info('該当するセリフが見つかりませんでした')
       return
     }
     const updatedDialogues = new Map<string, Dialogue>()
@@ -1078,7 +1096,7 @@ export default function StoryboardPage() {
         })),
       })),
     )
-    alert(`${updatedDialogues.size}件のセリフを置換しました`)
+    toast.success(`${updatedDialogues.size}件のセリフを置換しました`)
   }
 
   // 現在の動画の全シーンに対して BGM を一括適用
@@ -1437,54 +1455,42 @@ export default function StoryboardPage() {
       .filter((x): x is NonNullable<typeof x> => x !== null)
   }
 
-  async function handleUndoDeletion() {
-    if (!undoToast) return
-    const snaps = undoToast.snapshots
-    for (const snap of snaps) {
-      await saveScene(snap.scene)
-      for (const sd of snap.sceneDialogues) {
-        await saveSceneDialogue(sd)
-      }
-      for (const c of snap.castMembers) {
-        await saveSceneCastMember(c)
-      }
-    }
-    // メモリに戻す(dialogue は dialogues state から参照 or null)
-    const restoredScenes: SceneWithDialogues[] = snaps.map((snap) => ({
-      ...snap.scene,
-      dialogues: snap.sceneDialogues.map((sd) => ({
-        ...sd,
-        dialogue: dialogues.find((d) => d.id === sd.dialogue_id) ?? null,
-      })),
-    }))
-    setScenes((prev) => [...prev, ...restoredScenes])
-    setCast((prev) => [...prev, ...snaps.flatMap((s) => s.castMembers)])
-    setUndoToast(null)
-  }
-
-  // undoToast 表示期限切れで自動クリア
-  useEffect(() => {
-    if (!undoToast) return
-    const remain = undoToast.expiresAt - Date.now()
-    if (remain <= 0) {
-      setUndoToast(null)
-      return
-    }
-    const t = window.setTimeout(() => setUndoToast(null), remain)
-    return () => window.clearTimeout(t)
-  }, [undoToast])
-
   async function handleDeleteScene(id: string) {
     if (!confirm('このシーンを削除してよろしいですか？')) return
     const snapshots = snapshotScenes([id])
-    await deleteScene(id)
+    await save.track(deleteScene(id))
     setScenes((prev) => prev.filter((s) => s.id !== id))
     setCast((prev) => prev.filter((c) => c.scene_id !== id))
     if (selectedSceneId === id) setSelectedSceneId(null)
-    setUndoToast({
-      message: `シーン「${snapshots[0]?.scene.title ?? ''}」を削除`,
-      expiresAt: Date.now() + 8000,
-      snapshots,
+    const title = snapshots[0]?.scene.title ?? ''
+    toast.push({
+      kind: 'info',
+      text: `シーン「${title}」を削除しました`,
+      durationMs: 8000,
+      action: {
+        label: '元に戻す',
+        onClick: async () => {
+          for (const snap of snapshots) {
+            await save.track(saveScene(snap.scene))
+            for (const sd of snap.sceneDialogues) {
+              await save.track(saveSceneDialogue(sd))
+            }
+            for (const c of snap.castMembers) {
+              await save.track(saveSceneCastMember(c))
+            }
+          }
+          const restored: SceneWithDialogues[] = snapshots.map((snap) => ({
+            ...snap.scene,
+            dialogues: snap.sceneDialogues.map((sd) => ({
+              ...sd,
+              dialogue: dialogues.find((d) => d.id === sd.dialogue_id) ?? null,
+            })),
+          }))
+          setScenes((prev) => [...prev, ...restored])
+          setCast((prev) => [...prev, ...snapshots.flatMap((s) => s.castMembers)])
+          toast.success('削除を取り消しました')
+        },
+      },
     })
   }
 
@@ -1750,7 +1756,7 @@ export default function StoryboardPage() {
   function handleCopySceneDialoguesToClipboard(sceneId: string) {
     const scene = scenes.find((s) => s.id === sceneId)
     if (!scene || scene.dialogues.length === 0) {
-      alert('コピーするセリフがありません')
+      toast.warning('コピーするセリフがありません')
       return
     }
     const sorted = [...scene.dialogues].sort((a, b) => a.order_index - b.order_index)
@@ -1851,7 +1857,7 @@ export default function StoryboardPage() {
     setTelopStyle(DEFAULT_TELOP_STYLE)
     setShowResetConfirm(false)
     setResetInput('')
-    alert('すべてのデータを初期化しました')
+    toast.success('すべてのデータを初期化しました')
   }
 
   // 使われていないアセットを算出(他エンティティからの参照がないもの)
@@ -1876,7 +1882,7 @@ export default function StoryboardPage() {
     const { unusedBg, unusedBgm, unusedSe } = computeUnusedAssets()
     const total = unusedBg.length + unusedBgm.length + unusedSe.length
     if (total === 0) {
-      alert('削除できる未使用アセットはありません')
+      toast.info('削除できる未使用アセットはありません')
       return
     }
     if (
@@ -1892,7 +1898,7 @@ export default function StoryboardPage() {
     setBgmTracks((prev) => prev.filter((b) => !unusedBgm.some((u) => u.id === b.id)))
     setSounds((prev) => prev.filter((s) => !unusedSe.some((u) => u.id === s.id)))
     setShowCleanup(false)
-    alert(`${total} 件のアセットを削除しました`)
+    toast.success(`${total} 件のアセットを削除しました`)
   }
 
   // キャラ一括置換: Dialogue.character_id が src のものを全て tgt に書き換える。
@@ -1902,16 +1908,16 @@ export default function StoryboardPage() {
     const src = charReplaceFrom
     const tgt = charReplaceTo // '' = ナレーション化
     if (!src) {
-      alert('置換元キャラを選んでください')
+      toast.warning('置換元キャラを選んでください')
       return
     }
     if (src === tgt) {
-      alert('置換元と置換先が同じです')
+      toast.warning('置換元と置換先が同じです')
       return
     }
     const targetDialogues = dialogues.filter((d) => d.character_id === src)
     if (targetDialogues.length === 0) {
-      alert('このキャラのセリフはありません')
+      toast.info('このキャラのセリフはありません')
       return
     }
     const tgtName = tgt
@@ -1951,7 +1957,7 @@ export default function StoryboardPage() {
     setShowCharReplace(false)
     setCharReplaceFrom('')
     setCharReplaceTo('')
-    alert(`${updated.size} 件のセリフを置換しました`)
+    toast.success(`${updated.size} 件のセリフを置換しました`)
   }
 
   // シーンの title / description をその場で更新
@@ -1975,7 +1981,7 @@ export default function StoryboardPage() {
       created_at: existing.created_at,
       updated_at: now,
     }
-    await saveScene(updated)
+    await save.track(saveScene(updated))
     setScenes((prev) =>
       prev.map((s) =>
         s.id === sceneId ? { ...updated, dialogues: s.dialogues } : s,
@@ -2043,7 +2049,7 @@ export default function StoryboardPage() {
     if (!existing) return
     const now = new Date().toISOString()
     const updated: Dialogue = { ...existing, text, updated_at: now }
-    await saveDialogue(updated)
+    await save.track(saveDialogue(updated))
     setDialogues((prev) => prev.map((d) => (d.id === dialogueId ? updated : d)))
     setScenes((prev) =>
       prev.map((s) => ({
@@ -2076,7 +2082,10 @@ export default function StoryboardPage() {
         <div className="p-8">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-3xl font-bold text-foreground">ストーリーボード</h2>
+              <div className="flex items-center gap-3 flex-wrap">
+                <h2 className="text-3xl font-bold text-foreground">ストーリーボード</h2>
+                <SaveStatusBadge state={save.state} lastSavedAt={save.lastSavedAt} />
+              </div>
               <p className="text-muted-foreground mt-1">シーンを構築してストーリーを作成</p>
             </div>
             <div className="flex gap-2 flex-wrap">
@@ -2375,7 +2384,7 @@ export default function StoryboardPage() {
                           const scene = scenes.find((s) => s.id === editingSceneId)
                           const firstText = scene?.dialogues[0]?.dialogue?.text?.trim()
                           if (!firstText) {
-                            alert('このシーンにはセリフがないためタイトルを生成できません')
+                            toast.warning('このシーンにはセリフがないためタイトルを生成できません')
                             return
                           }
                           const short =
@@ -4264,27 +4273,6 @@ export default function StoryboardPage() {
           >
             選択解除
           </Button>
-        </div>
-      )}
-      {/* Undo トースト: 削除直後に右下に出現し、8秒後に自動消去 */}
-      {undoToast && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-foreground text-background px-4 py-3 rounded-lg shadow-lg border border-border max-w-sm">
-          <span className="text-sm">{undoToast.message}</span>
-          <button
-            type="button"
-            onClick={handleUndoDeletion}
-            className="text-sm font-semibold text-primary hover:underline"
-          >
-            元に戻す
-          </button>
-          <button
-            type="button"
-            onClick={() => setUndoToast(null)}
-            className="text-sm text-background/60 hover:text-background p-1"
-            title="閉じる"
-          >
-            <X size={14} />
-          </button>
         </div>
       )}
 
