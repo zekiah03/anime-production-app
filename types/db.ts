@@ -125,6 +125,8 @@ export interface SceneDialogue {
   // キャラクターの立ち位置(0..1, 0.5=中央) と スケール(1.0=縦いっぱい)
   character_x: number
   character_scale: number
+  // キャラクターの左右反転(斜め前を向いている立ち絵を逆向きにする)
+  character_flipped?: boolean
   created_at: string
 }
 
@@ -157,6 +159,8 @@ export interface SceneCastMember {
   idle_expression_id: string | null
   // 描画順(小さいほど奥)
   order_index: number
+  // 左右反転(斜め前向きの立ち絵を逆向きにする)
+  flipped?: boolean
   created_at: string
 }
 

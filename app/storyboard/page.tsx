@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video, Type } from 'lucide-react'
+import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video, Type, FlipHorizontal } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar'
 import { SceneExportDialog } from '@/components/scene-export-dialog'
 import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
@@ -326,11 +326,16 @@ export default function StoryboardPage() {
     setDialogueToAdd('')
   }
 
-  // SceneDialogue の SE / キャラ位置 を更新(UI操作のたびにローカル先行で反映、DBは fire-and-forget)
+  // SceneDialogue の SE / キャラ位置 / 反転 を更新
   function updateSceneDialogueMeta(
     sceneId: string,
     sdId: string,
-    patch: Partial<Pick<SceneDialogue, 'se_id' | 'se_volume' | 'character_x' | 'character_scale'>>,
+    patch: Partial<
+      Pick<
+        SceneDialogue,
+        'se_id' | 'se_volume' | 'character_x' | 'character_scale' | 'character_flipped'
+      >
+    >,
   ) {
     setScenes((prev) =>
       prev.map((s) => {
@@ -353,6 +358,7 @@ export default function StoryboardPage() {
                 typeof rowPart.character_x === 'number' ? rowPart.character_x : 0.5,
               character_scale:
                 typeof rowPart.character_scale === 'number' ? rowPart.character_scale : 1.0,
+              character_flipped: rowPart.character_flipped ?? false,
               created_at: rowPart.created_at,
             }
             saveSceneDialogue(row).catch((e) =>
@@ -716,6 +722,18 @@ export default function StoryboardPage() {
                                             >
                                               大
                                             </button>
+                                            <span className="text-muted-foreground">|</span>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateCastMember(member.id, { flipped: !member.flipped })
+                                              }
+                                              className={`${btn(!!member.flipped)} gap-1 inline-flex items-center`}
+                                              title="左右反転"
+                                            >
+                                              <FlipHorizontal size={12} />
+                                              反転
+                                            </button>
                                           </div>
                                           <div className="flex items-center gap-2">
                                             <span className="text-xs text-muted-foreground flex-shrink-0">
@@ -890,6 +908,20 @@ export default function StoryboardPage() {
                                               大
                                             </button>
                                           </div>
+                                          <span className="text-muted-foreground text-xs flex-shrink-0">|</span>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              updateSceneDialogueMeta(scene.id, sd.id, {
+                                                character_flipped: !sd.character_flipped,
+                                              })
+                                            }
+                                            className={`${presetBtn(!!sd.character_flipped)} gap-1 inline-flex items-center`}
+                                            title="左右反転(斜め前向きの立ち絵を逆向きに)"
+                                          >
+                                            <FlipHorizontal size={12} />
+                                            反転
+                                          </button>
                                         </div>
                                         )}
                                       </div>
@@ -1125,6 +1157,7 @@ interface SceneDialogueResolved {
   seVolume: number
   characterX: number
   characterScale: number
+  characterFlipped: boolean
   extras: StageExtraResolved[]
   // ナレーション(無音)用の表示時間 ms。audio がある場合は無視される
   silentDurationMs: number
@@ -1136,6 +1169,7 @@ interface StageExtraResolved {
   x: number
   scale: number
   idleExpressionId: string | null
+  flipped: boolean
 }
 
 function ScenePlayerDialog({
@@ -1223,6 +1257,10 @@ function ScenePlayerDialog({
       const characterScale =
         speakerCast?.scale ??
         (typeof sd.character_scale === 'number' ? sd.character_scale : 1.0)
+      const characterFlipped =
+        typeof speakerCast?.flipped === 'boolean'
+          ? !!speakerCast.flipped
+          : !!sd.character_flipped
       // 共演者(キャスト - 発話者)
       const extras: StageExtraResolved[] = sceneCast
         .filter((m) => m.character_id !== d.character_id)
@@ -1235,6 +1273,7 @@ function ScenePlayerDialog({
             x: m.x,
             scale: m.scale,
             idleExpressionId: m.idle_expression_id,
+            flipped: !!m.flipped,
           }
         })
         .filter((x): x is StageExtraResolved => x !== null)
@@ -1250,6 +1289,7 @@ function ScenePlayerDialog({
         seVolume,
         characterX,
         characterScale,
+        characterFlipped,
         extras,
         silentDurationMs,
       } satisfies SceneDialogueResolved
@@ -1314,6 +1354,7 @@ function ScenePlayerDialog({
                 backgroundLayers={backgroundLayers}
                 characterX={current?.characterX ?? 0.5}
                 characterScale={current?.characterScale ?? 1.0}
+                characterFlipped={current?.characterFlipped ?? false}
                 extraCharacters={current?.extras ?? []}
                 silentDurationMs={current?.silentDurationMs ?? 3000}
                 playing={playing}

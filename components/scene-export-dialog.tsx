@@ -52,6 +52,7 @@ interface ExportExtra {
   x: number
   scale: number
   imageUrl: string // アイドル表情(or main image)
+  flipped: boolean
 }
 
 interface ResolvedDialogue {
@@ -66,6 +67,7 @@ interface ResolvedDialogue {
   seVolume: number
   characterX: number
   characterScale: number
+  characterFlipped: boolean
   extras: ExportExtra[]
   silentDurationMs: number
 }
@@ -150,13 +152,23 @@ export function SceneExportDialog({
           const characterScale =
             speakerCast?.scale ??
             (typeof sd.character_scale === 'number' ? sd.character_scale : 1.0)
+          const characterFlipped =
+            typeof speakerCast?.flipped === 'boolean'
+              ? !!speakerCast.flipped
+              : !!sd.character_flipped
           const extras: ExportExtra[] = sceneCast
             .filter((m) => m.character_id !== d.character_id)
             .map((m) => {
               const c = characters.find((ch) => ch.id === m.character_id)
               const url = pickIdleUrl(m)
               if (!c || !url) return null
-              return { character: c, x: m.x, scale: m.scale, imageUrl: url }
+              return {
+                character: c,
+                x: m.x,
+                scale: m.scale,
+                imageUrl: url,
+                flipped: !!m.flipped,
+              }
             })
             .filter((x): x is ExportExtra => x !== null)
           const silentDurationMs =
@@ -175,6 +187,7 @@ export function SceneExportDialog({
             seVolume,
             characterX,
             characterScale,
+            characterFlipped,
             extras,
             silentDurationMs,
           } as ResolvedDialogue
@@ -247,7 +260,15 @@ export function SceneExportDialog({
       const cx = WIDTH * extra.x
       const x = cx - w / 2
       const y = HEIGHT - h
-      ctx.drawImage(extraImg, x, y, w, h)
+      if (extra.flipped) {
+        ctx.save()
+        ctx.translate(cx, 0)
+        ctx.scale(-1, 1)
+        ctx.drawImage(extraImg, -w / 2, y, w, h)
+        ctx.restore()
+      } else {
+        ctx.drawImage(extraImg, x, y, w, h)
+      }
     }
 
     let imgUrl: string | null = null
@@ -279,7 +300,15 @@ export function SceneExportDialog({
         const cx = WIDTH * current.characterX
         const x = cx - w / 2
         const y = HEIGHT - h
-        ctx.drawImage(img, x, y, w, h)
+        if (current.characterFlipped) {
+          ctx.save()
+          ctx.translate(cx, 0)
+          ctx.scale(-1, 1)
+          ctx.drawImage(img, -w / 2, y, w, h)
+          ctx.restore()
+        } else {
+          ctx.drawImage(img, x, y, w, h)
+        }
       }
     }
 

@@ -13,6 +13,7 @@ export interface StageExtraCharacter {
   x: number
   scale: number
   idleExpressionId: string | null
+  flipped?: boolean
 }
 
 interface LipSyncStageProps {
@@ -29,6 +30,8 @@ interface LipSyncStageProps {
   // 立ち位置 (0..1, 0.5=中央) と縦方向スケール (1.0=ステージ高さいっぱい)
   characterX?: number
   characterScale?: number
+  // 左右反転(斜め前向きの立ち絵を逆向きにする)
+  characterFlipped?: boolean
   // 発話者以外の共演キャラ。 background と main character の間に描画する。
   extraCharacters?: StageExtraCharacter[]
   // 音声なしのナレーションで使う表示時間 ms。audioUrl が null かつ playing の間に、
@@ -62,6 +65,7 @@ export function LipSyncStage({
   backgroundLayers,
   characterX,
   characterScale,
+  characterFlipped,
   extraCharacters,
   silentDurationMs,
   onEnded,
@@ -70,6 +74,7 @@ export function LipSyncStage({
   const effectiveStyle = telopStyle ?? DEFAULT_TELOP_STYLE
   const cx = typeof characterX === 'number' ? characterX : 0.5
   const cs = typeof characterScale === 'number' ? characterScale : 1.0
+  const flipSx = characterFlipped ? -1 : 1
 
   // typewriter の段階表示用(intro=typewriter 以外のときは常に全文)
   const [revealedText, setRevealedText] = useState<string>(caption ?? '')
@@ -286,6 +291,7 @@ export function LipSyncStage({
       {extraCharacters?.map((extra) => {
         const url = pickIdleImage(extra)
         if (!url) return null
+        const exFlip = extra.flipped ? -1 : 1
         return (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -299,7 +305,7 @@ export function LipSyncStage({
               height: `${extra.scale * 100}%`,
               width: 'auto',
               maxWidth: 'none',
-              transform: 'translateX(-50%)',
+              transform: `translateX(-50%) scaleX(${exFlip})`,
               objectFit: 'contain',
             }}
           />
@@ -318,7 +324,7 @@ export function LipSyncStage({
             height: `${cs * 100}%`,
             width: 'auto',
             maxWidth: 'none',
-            transform: 'translateX(-50%)',
+            transform: `translateX(-50%) scaleX(${flipSx})`,
             objectFit: 'contain',
           }}
         />
