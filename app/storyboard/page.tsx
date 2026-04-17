@@ -15,10 +15,13 @@ import { charColorHsl } from '@/lib/char-color'
 import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
+  deleteBgmTrack,
   deleteCastPreset,
+  deleteIllustration,
   deleteScene,
   deleteSceneCastMember,
   deleteSceneDialogue,
+  deleteSoundEffect,
   deleteVideo,
   getAllAudioFiles,
   getAllBgmTracks,
@@ -123,6 +126,8 @@ export default function StoryboardPage() {
   // 動画連続再生
   const [playingVideoId, setPlayingVideoId] = useState<string | null>(null)
   const [playingVideoSceneIdx, setPlayingVideoSceneIdx] = useState(0)
+  // 未使用アセット掃除ダイアログ
+  const [showCleanup, setShowCleanup] = useState(false)
   // ナレーション追加フォーム(展開中のシーンに対して使う)
   const [narrationText, setNarrationText] = useState('')
   const [narrationAudioId, setNarrationAudioId] = useState('')
@@ -1588,6 +1593,47 @@ export default function StoryboardPage() {
     })
   }
 
+  // 使われていないアセットを算出(他エンティティからの参照がないもの)
+  function computeUnusedAssets() {
+    const usedBg = new Set<string>()
+    const usedBgm = new Set<string>()
+    const usedSe = new Set<string>()
+    for (const s of scenes) {
+      if (s.background_illustration_id) usedBg.add(s.background_illustration_id)
+      if (s.bgm_track_id) usedBgm.add(s.bgm_track_id)
+      for (const sd of s.dialogues) {
+        if (sd.se_id) usedSe.add(sd.se_id)
+      }
+    }
+    const unusedBg = illustrations.filter((i) => !usedBg.has(i.id))
+    const unusedBgm = bgmTracks.filter((b) => !usedBgm.has(b.id))
+    const unusedSe = sounds.filter((s) => !usedSe.has(s.id))
+    return { unusedBg, unusedBgm, unusedSe }
+  }
+
+  async function handleCleanupUnused() {
+    const { unusedBg, unusedBgm, unusedSe } = computeUnusedAssets()
+    const total = unusedBg.length + unusedBgm.length + unusedSe.length
+    if (total === 0) {
+      alert('削除できる未使用アセットはありません')
+      return
+    }
+    if (
+      !window.confirm(
+        `未使用アセット ${total} 件(背景 ${unusedBg.length} / BGM ${unusedBgm.length} / SE ${unusedSe.length})を削除します。よろしいですか?`,
+      )
+    )
+      return
+    for (const i of unusedBg) await deleteIllustration(i.id)
+    for (const b of unusedBgm) await deleteBgmTrack(b.id)
+    for (const s of unusedSe) await deleteSoundEffect(s.id)
+    setIllustrations((prev) => prev.filter((i) => !unusedBg.some((u) => u.id === i.id)))
+    setBgmTracks((prev) => prev.filter((b) => !unusedBgm.some((u) => u.id === b.id)))
+    setSounds((prev) => prev.filter((s) => !unusedSe.some((u) => u.id === s.id)))
+    setShowCleanup(false)
+    alert(`${total} 件のアセットを削除しました`)
+  }
+
   // キャラ一括置換: Dialogue.character_id が src のものを全て tgt に書き換える。
   // tgt が空の場合はナレーション化(character_id=null)。
   // resetAudio=true なら audio_id と expression_id も null に戻す(別キャラの声のまま残ると不整合)。
@@ -1701,6 +1747,35 @@ export default function StoryboardPage() {
     if (target) setSelectedSceneId(target.id)
   }
 
+  // セリフのキャラを直接切替(null=ナレーション化)。音声と表情はキャラ依存なのでリセット。
+  async function handleChangeDialogueCharacter(
+    dialogueId: string,
+    newCharId: string | null,
+  ) {
+    const existing = dialogues.find((d) => d.id === dialogueId)
+    if (!existing) return
+    if ((existing.character_id ?? null) === newCharId) return
+    const now = new Date().toISOString()
+    const updated: Dialogue = {
+      ...existing,
+      character_id: newCharId,
+      audio_id: null,
+      expression_id: null,
+      notes: newCharId === null ? 'narration' : existing.notes === 'narration' ? null : existing.notes,
+      updated_at: now,
+    }
+    await saveDialogue(updated)
+    setDialogues((prev) => prev.map((d) => (d.id === dialogueId ? updated : d)))
+    setScenes((prev) =>
+      prev.map((s) => ({
+        ...s,
+        dialogues: s.dialogues.map((sd) =>
+          sd.dialogue?.id === dialogueId ? { ...sd, dialogue: updated } : sd,
+        ),
+      })),
+    )
+  }
+
   // セリフのテキストをインライン編集(Dialogue.text を直接更新)
   async function handleEditDialogueText(dialogueId: string, text: string) {
     const existing = dialogues.find((d) => d.id === dialogueId)
@@ -1795,6 +1870,14 @@ export default function StoryboardPage() {
                 disabled={characters.length === 0}
               >
                 キャラ置換
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowCleanup(true)}
+                className="gap-2"
+                title="どのシーンからも参照されていない背景/BGM/SE を見つけて一括削除"
+              >
+                未使用掃除
               </Button>
               <Button
                 variant="outline"
@@ -2825,11 +2908,33 @@ export default function StoryboardPage() {
                                       >
                                         <div className="flex items-start justify-between gap-2">
                                           <div className="flex-1 min-w-0 space-y-1">
-                                            {isNarration && (
-                                              <span className="inline-block text-[10px] px-1.5 py-0.5 bg-accent/20 text-accent rounded align-middle">
-                                                ナレーション
-                                              </span>
-                                            )}
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              {sd.dialogue && (
+                                                <select
+                                                  value={sd.dialogue.character_id ?? ''}
+                                                  onChange={(e) =>
+                                                    handleChangeDialogueCharacter(
+                                                      sd.dialogue!.id,
+                                                      e.target.value || null,
+                                                    )
+                                                  }
+                                                  className="px-1.5 py-0.5 text-[11px] bg-card border border-input rounded text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                                  title="このセリフの発話キャラを切替(音声と表情はリセット)"
+                                                >
+                                                  <option value="">ナレーション</option>
+                                                  {characters.map((c) => (
+                                                    <option key={c.id} value={c.id}>
+                                                      {c.name}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              )}
+                                              {isNarration && (
+                                                <span className="inline-block text-[10px] px-1.5 py-0.5 bg-accent/20 text-accent rounded align-middle">
+                                                  ナレーション
+                                                </span>
+                                              )}
+                                            </div>
                                             {sd.dialogue ? (
                                               <textarea
                                                 value={sd.dialogue.text}
@@ -3029,7 +3134,7 @@ export default function StoryboardPage() {
                                         </div>
                                         )}
                                         {/* 間合い(このセリフを終えてから次へ進むまでの無音) */}
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-2 flex-wrap">
                                           <span className="text-xs text-muted-foreground flex-shrink-0">
                                             間合い
                                           </span>
@@ -3049,6 +3154,30 @@ export default function StoryboardPage() {
                                           <span className="text-xs text-muted-foreground tabular-nums w-12 text-right">
                                             {((sd.pause_after_ms ?? 0) / 1000).toFixed(1)}秒
                                           </span>
+                                          <div className="flex gap-1">
+                                            {[0, 500, 1000, 2000].map((ms) => {
+                                              const active = (sd.pause_after_ms ?? 0) === ms
+                                              return (
+                                                <button
+                                                  key={ms}
+                                                  type="button"
+                                                  onClick={() =>
+                                                    updateSceneDialogueMeta(scene.id, sd.id, {
+                                                      pause_after_ms: ms,
+                                                    })
+                                                  }
+                                                  className={`px-1.5 py-0.5 text-[10px] rounded border transition tabular-nums ${
+                                                    active
+                                                      ? 'bg-primary/20 border-primary/40 text-primary font-medium'
+                                                      : 'bg-card border-input text-muted-foreground hover:bg-primary/10'
+                                                  }`}
+                                                  title={`間合い ${(ms / 1000).toFixed(1)}秒`}
+                                                >
+                                                  {(ms / 1000).toFixed(1)}s
+                                                </button>
+                                              )
+                                            })}
+                                          </div>
                                         </div>
                                         {/* 個別字幕スタイル上書き(このセリフだけ演出を変える) */}
                                         <div className="flex items-center gap-2 flex-wrap">
@@ -3823,6 +3952,89 @@ export default function StoryboardPage() {
                     </Button>
                   </div>
                 </div>
+              </DialogContent>
+            </Dialog>
+            {/* 未使用アセット掃除 */}
+            <Dialog open={showCleanup} onOpenChange={(o) => setShowCleanup(o)}>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>未使用アセットの掃除</DialogTitle>
+                  <DialogDescription>
+                    シーン・セリフのどこからも参照されていない素材を削除します。復元はできません。
+                  </DialogDescription>
+                </DialogHeader>
+                {(() => {
+                  const { unusedBg, unusedBgm, unusedSe } = computeUnusedAssets()
+                  const total = unusedBg.length + unusedBgm.length + unusedSe.length
+                  return (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="p-2 bg-background rounded text-center">
+                          <p className="text-[10px] text-muted-foreground">背景</p>
+                          <p className="text-lg font-bold text-primary tabular-nums">
+                            {unusedBg.length}
+                          </p>
+                        </div>
+                        <div className="p-2 bg-background rounded text-center">
+                          <p className="text-[10px] text-muted-foreground">BGM</p>
+                          <p className="text-lg font-bold text-primary tabular-nums">
+                            {unusedBgm.length}
+                          </p>
+                        </div>
+                        <div className="p-2 bg-background rounded text-center">
+                          <p className="text-[10px] text-muted-foreground">SE</p>
+                          <p className="text-lg font-bold text-primary tabular-nums">
+                            {unusedSe.length}
+                          </p>
+                        </div>
+                      </div>
+                      {total > 0 && (
+                        <div className="max-h-60 overflow-y-auto space-y-1 border border-border rounded p-2">
+                          {unusedBg.map((i) => (
+                            <div
+                              key={`bg-${i.id}`}
+                              className="text-xs text-muted-foreground flex items-center gap-2"
+                            >
+                              <span className="text-[10px] px-1 bg-accent/20 rounded">背景</span>
+                              <span className="truncate">{i.name}</span>
+                            </div>
+                          ))}
+                          {unusedBgm.map((b) => (
+                            <div
+                              key={`bgm-${b.id}`}
+                              className="text-xs text-muted-foreground flex items-center gap-2"
+                            >
+                              <span className="text-[10px] px-1 bg-accent/20 rounded">BGM</span>
+                              <span className="truncate">{b.name}</span>
+                            </div>
+                          ))}
+                          {unusedSe.map((s) => (
+                            <div
+                              key={`se-${s.id}`}
+                              className="text-xs text-muted-foreground flex items-center gap-2"
+                            >
+                              <span className="text-[10px] px-1 bg-accent/20 rounded">SE</span>
+                              <span className="truncate">{s.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex gap-2 justify-end">
+                        <Button variant="outline" size="sm" onClick={() => setShowCleanup(false)}>
+                          キャンセル
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={handleCleanupUnused}
+                          disabled={total === 0}
+                          className="text-destructive"
+                        >
+                          {total} 件を削除
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })()}
               </DialogContent>
             </Dialog>
             {/* キャラ一括置換 */}
