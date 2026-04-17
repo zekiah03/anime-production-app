@@ -11,6 +11,7 @@ import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
 import { SceneTimelineBar, type TimelineClip } from '@/components/scene-timeline'
 import { VideoExportDialog } from '@/components/video-export-dialog'
 import { SceneThumbnail } from '@/components/scene-thumbnail'
+import { charColorHsl } from '@/lib/char-color'
 import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
@@ -65,6 +66,7 @@ export default function StoryboardPage() {
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null)
   const [editingVideoId, setEditingVideoId] = useState<string | null>(null)
   const [editingVideoName, setEditingVideoName] = useState('')
+  const [draggedVideoId, setDraggedVideoId] = useState<string | null>(null)
   const [castPresets, setCastPresets] = useState<CastPreset[]>([])
   const [loading, setLoading] = useState(true)
   const [showSceneForm, setShowSceneForm] = useState(false)
@@ -225,6 +227,21 @@ export default function StoryboardPage() {
     const updated: Video = { ...existing, name: name.trim(), updated_at: new Date().toISOString() }
     await saveVideo(updated)
     setVideos((prev) => prev.map((v) => (v.id === id ? updated : v)))
+  }
+
+  // 動画タブのドラッグ並び替え
+  async function handleReorderVideos(fromId: string, toId: string) {
+    if (fromId === toId) return
+    const sorted = [...videos].sort((a, b) => a.order_index - b.order_index)
+    const from = sorted.findIndex((v) => v.id === fromId)
+    const to = sorted.findIndex((v) => v.id === toId)
+    if (from === -1 || to === -1) return
+    const [moved] = sorted.splice(from, 1)
+    sorted.splice(to, 0, moved)
+    const now = new Date().toISOString()
+    const renumbered = sorted.map((v, i) => ({ ...v, order_index: i, updated_at: now }))
+    await Promise.all(renumbered.map((v) => saveVideo(v)))
+    setVideos(renumbered)
   }
 
   async function handleDeleteVideo(id: string) {
@@ -469,6 +486,7 @@ export default function StoryboardPage() {
         hasSe: !!sd.se_id,
         isNarration,
         text: d?.text ?? '',
+        colorHsl: d?.character_id ? charColorHsl(d.character_id) : undefined,
       }
     })
   }
@@ -742,7 +760,7 @@ export default function StoryboardPage() {
     setShowBulkBgm(false)
   }
 
-  // キーボードショートカット: Esc / / / Delete
+  // キーボードショートカット: Esc / / / Delete / Ctrl+D / Ctrl+A
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
@@ -753,7 +771,6 @@ export default function StoryboardPage() {
           target.tagName === 'SELECT' ||
           target.isContentEditable)
       if (e.key === 'Escape') {
-        // テキスト入力中でも Esc で選択解除したいことが多いので許容
         if (checkedSceneIds.size > 0) {
           e.preventDefault()
           clearChecked()
@@ -771,6 +788,28 @@ export default function StoryboardPage() {
         }
       }
       if (isTyping) return
+      // Ctrl/Cmd + A: 現在の動画内のシーンを全選択
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+        e.preventDefault()
+        const ids = scenes
+          .filter((s) => (s.video_id ?? null) === selectedVideoId)
+          .map((s) => s.id)
+        setCheckedSceneIds(new Set(ids))
+        return
+      }
+      // Ctrl/Cmd + D: 選択中(チェック)のシーンを複製、なければ展開中のシーンを複製
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault()
+        if (checkedSceneIds.size > 0) {
+          for (const id of Array.from(checkedSceneIds)) {
+            handleDuplicateScene(id)
+          }
+          clearChecked()
+        } else if (selectedSceneId) {
+          handleDuplicateScene(selectedSceneId)
+        }
+        return
+      }
       if (e.key === '/') {
         e.preventDefault()
         searchInputRef.current?.focus()
@@ -784,7 +823,7 @@ export default function StoryboardPage() {
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [checkedSceneIds, allExpanded, selectedSceneId])
+  }, [checkedSceneIds, allExpanded, selectedSceneId, scenes, selectedVideoId])
 
   // ナレーション(character_id=null の Dialogue)を新規作成してシーンに追加する
   async function handleAddNarration(sceneId: string) {
@@ -1155,11 +1194,21 @@ export default function StoryboardPage() {
               return (
                 <div
                   key={v.id}
-                  className={`flex items-center gap-1 rounded border transition ${
+                  draggable
+                  onDragStart={() => setDraggedVideoId(v.id)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => {
+                    if (draggedVideoId && draggedVideoId !== v.id) {
+                      handleReorderVideos(draggedVideoId, v.id)
+                    }
+                    setDraggedVideoId(null)
+                  }}
+                  onDragEnd={() => setDraggedVideoId(null)}
+                  className={`flex items-center gap-1 rounded border transition cursor-move ${
                     isActive
                       ? 'bg-primary/20 border-primary/40'
                       : 'bg-background border-input hover:bg-primary/10'
-                  }`}
+                  } ${draggedVideoId === v.id ? 'opacity-50' : ''}`}
                 >
                   <button
                     type="button"
@@ -1167,7 +1216,7 @@ export default function StoryboardPage() {
                     className={`pl-3 pr-1 py-1 text-sm ${
                       isActive ? 'text-primary font-medium' : 'text-foreground'
                     }`}
-                    title={`この動画のシーンを表示(${sceneCount} 個)`}
+                    title={`この動画のシーンを表示(${sceneCount} 個)。ドラッグで並び替え`}
                   >
                     {v.name}
                     <span className="text-xs text-muted-foreground ml-1.5">
@@ -1835,9 +1884,17 @@ export default function StoryboardPage() {
                                           onClick={(e) => e.stopPropagation()}
                                         >
                                           <div className="flex items-center justify-between gap-2">
-                                            <p className="text-sm font-medium text-foreground truncate">
-                                              {char?.name ?? '(削除済み)'}
-                                            </p>
+                                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                                              <span
+                                                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                                style={{
+                                                  backgroundColor: charColorHsl(member.character_id),
+                                                }}
+                                              />
+                                              <p className="text-sm font-medium text-foreground truncate">
+                                                {char?.name ?? '(削除済み)'}
+                                              </p>
+                                            </div>
                                             <button
                                               onClick={() => handleDeleteCastMember(member.id)}
                                               className="p-1 hover:bg-destructive/20 rounded transition flex-shrink-0"
@@ -2483,6 +2540,10 @@ export default function StoryboardPage() {
                               ) : (
                                 <div className="w-8 h-8 rounded bg-muted flex-shrink-0" />
                               )}
+                              <span
+                                className="w-2 h-2 rounded-full flex-shrink-0"
+                                style={{ backgroundColor: charColorHsl(c.id) }}
+                              />
                               <p className="text-xs text-foreground truncate flex-1 min-w-0">
                                 {c.name}
                               </p>
