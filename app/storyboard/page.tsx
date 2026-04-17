@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video as VideoIcon, Type, FlipHorizontal, ChevronDown, ChevronUp, Minimize2, Pencil, Folder, FolderPlus, Copy, Clock, Search, X, Check, Maximize2 } from 'lucide-react'
+import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video as VideoIcon, Type, FlipHorizontal, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Minimize2, Pencil, Folder, FolderPlus, Copy, Clock, Search, X, Check, Maximize2, Moon, Sun, Volume2, VolumeX, AlertTriangle, ArrowRight } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar'
 import { SceneExportDialog } from '@/components/scene-export-dialog'
 import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
@@ -2076,7 +2076,7 @@ export default function StoryboardPage() {
                 className="gap-2"
                 title={darkMode ? 'ライトモードに切替' : 'ダークモードに切替'}
               >
-                {darkMode ? '☀️' : '🌙'}
+                {darkMode ? <Sun size={16} /> : <Moon size={16} />}
               </Button>
               <Button
                 variant="outline"
@@ -2546,7 +2546,7 @@ export default function StoryboardPage() {
                 </div>
                 {replaceMode && (
                   <div className="flex items-center gap-2 p-2 bg-background border border-dashed border-input rounded-md">
-                    <span className="text-xs text-muted-foreground flex-shrink-0">→</span>
+                    <ArrowRight size={14} className="text-muted-foreground flex-shrink-0" />
                     <input
                       type="text"
                       placeholder="置換後の文字列(空欄にすると削除)"
@@ -2782,10 +2782,11 @@ export default function StoryboardPage() {
                                     type="button"
                                     onClick={() => jumpToAdjacentScene(scene.id, -1)}
                                     disabled={index === 0}
-                                    className="px-3 py-1 rounded border border-input text-foreground hover:bg-primary/10 disabled:opacity-30 disabled:cursor-not-allowed"
+                                    className="px-3 py-1 rounded border border-input text-foreground hover:bg-primary/10 disabled:opacity-30 disabled:cursor-not-allowed inline-flex items-center gap-1"
                                     title="前のシーンに展開を移す"
                                   >
-                                    ← 前のシーン
+                                    <ChevronLeft size={14} />
+                                    前のシーン
                                   </button>
                                   <span className="text-muted-foreground tabular-nums">
                                     {index + 1} / {filteredScenes.length}
@@ -2794,10 +2795,11 @@ export default function StoryboardPage() {
                                     type="button"
                                     onClick={() => jumpToAdjacentScene(scene.id, 1)}
                                     disabled={index === filteredScenes.length - 1}
-                                    className="px-3 py-1 rounded border border-input text-foreground hover:bg-primary/10 disabled:opacity-30 disabled:cursor-not-allowed"
+                                    className="px-3 py-1 rounded border border-input text-foreground hover:bg-primary/10 disabled:opacity-30 disabled:cursor-not-allowed inline-flex items-center gap-1"
                                     title="次のシーンに展開を移す"
                                   >
-                                    次のシーン →
+                                    次のシーン
+                                    <ChevronRight size={14} />
                                   </button>
                                 </div>
                               )}
@@ -3737,7 +3739,7 @@ export default function StoryboardPage() {
                             <option value="">未分類</option>
                             {videos.map((v) => (
                               <option key={v.id} value={v.id}>
-                                → {v.name}
+                                移動: {v.name}
                               </option>
                             ))}
                           </select>
@@ -3952,7 +3954,7 @@ export default function StoryboardPage() {
                               key={i}
                               className="text-[11px] text-destructive flex items-start gap-1"
                             >
-                              <span>⚠️</span>
+                              <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
                               <span>{w}</span>
                             </li>
                           ))}
@@ -4062,10 +4064,10 @@ export default function StoryboardPage() {
           <button
             type="button"
             onClick={() => setUndoToast(null)}
-            className="text-sm text-background/60 hover:text-background"
+            className="text-sm text-background/60 hover:text-background p-1"
             title="閉じる"
           >
-            ×
+            <X size={14} />
           </button>
         </div>
       )}
@@ -5036,14 +5038,15 @@ function ScenePlayerDialog({
                 <button
                   type="button"
                   onClick={() => setBgmMuted((v) => !v)}
-                  className={`ml-2 px-2 py-1 text-xs rounded border transition ${
+                  className={`ml-2 px-2 py-1 text-xs rounded border transition inline-flex items-center gap-1 ${
                     bgmMuted
                       ? 'bg-destructive/20 border-destructive/40 text-destructive'
                       : 'bg-background border-input text-muted-foreground hover:bg-primary/10'
                   }`}
                   title={bgmMuted ? 'BGM ミュート中(クリックで解除)' : 'BGM をミュート'}
                 >
-                  {bgmMuted ? 'BGM🔇' : 'BGM🔊'}
+                  {bgmMuted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+                  <span>BGM</span>
                 </button>
               )}
               <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
