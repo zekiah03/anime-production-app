@@ -11,12 +11,13 @@ import type {
   Dialogue,
   Scene,
   SceneDialogue,
+  SoundEffect,
   Illustration,
   Layer,
 } from '@/types/db'
 
 const DB_NAME = 'anime-production'
-const DB_VERSION = 3
+const DB_VERSION = 4
 
 // 永続化形式 (file_url / image_url は実行時に Blob から生成するので保存しない)
 type StoredCharacter = Omit<Character, 'image_url'> & { image_blob?: Blob }
@@ -24,6 +25,7 @@ type StoredAudioFile = Omit<AudioFile, 'file_url'> & { file_blob: Blob }
 type StoredLayer = Omit<Layer, 'image_url'> & { image_blob: Blob }
 type StoredExpression = Omit<CharacterExpression, 'image_url'> & { image_blob: Blob }
 type StoredBgmTrack = Omit<BgmTrack, 'file_url'> & { file_blob: Blob }
+type StoredSoundEffect = Omit<SoundEffect, 'file_url'> & { file_blob: Blob }
 
 interface AnimeDB extends DBSchema {
   characters: { key: string; value: StoredCharacter }
@@ -55,6 +57,7 @@ interface AnimeDB extends DBSchema {
     indexes: { by_illustration: string }
   }
   bgm_tracks: { key: string; value: StoredBgmTrack }
+  sound_effects: { key: string; value: StoredSoundEffect }
 }
 
 let dbPromise: Promise<IDBPDatabase<AnimeDB>> | null = null
@@ -98,6 +101,9 @@ function getDB() {
         }
         if (!db.objectStoreNames.contains('bgm_tracks')) {
           db.createObjectStore('bgm_tracks', { keyPath: 'id' })
+        }
+        if (!db.objectStoreNames.contains('sound_effects')) {
+          db.createObjectStore('sound_effects', { keyPath: 'id' })
         }
       },
     })
@@ -412,6 +418,45 @@ export async function deleteBgmTrack(id: string): Promise<void> {
   for await (const cursor of tx.objectStore('scenes').iterate()) {
     if (cursor.value.bgm_track_id === id) {
       await cursor.update({ ...cursor.value, bgm_track_id: null })
+    }
+  }
+  await tx.done
+}
+
+// ==================== Sound Effects ====================
+
+function hydrateSe(stored: StoredSoundEffect): SoundEffect {
+  return {
+    ...stored,
+    file_url: URL.createObjectURL(stored.file_blob),
+  }
+}
+
+export async function getAllSoundEffects(): Promise<SoundEffect[]> {
+  const db = await getDB()
+  const all = await db.getAll('sound_effects')
+  return all
+    .map(hydrateSe)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+}
+
+export async function saveSoundEffect(se: SoundEffect): Promise<void> {
+  if (!se.file_blob) throw new Error('file_blob is required')
+  const db = await getDB()
+  const { file_url: _file_url, ...rest } = se
+  void _file_url
+  await db.put('sound_effects', { ...rest, file_blob: se.file_blob })
+}
+
+export async function deleteSoundEffect(id: string): Promise<void> {
+  const db = await getDB()
+  // 関連する scene_dialogues の se_id を null にする
+  const tx = db.transaction(['sound_effects', 'scene_dialogues'], 'readwrite')
+  await tx.objectStore('sound_effects').delete(id)
+
+  for await (const cursor of tx.objectStore('scene_dialogues').iterate()) {
+    if (cursor.value.se_id === id) {
+      await cursor.update({ ...cursor.value, se_id: null })
     }
   }
   await tx.done

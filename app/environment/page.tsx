@@ -16,19 +16,23 @@ import {
   Upload,
   Image as ImageIcon,
   Music,
+  Zap,
 } from 'lucide-react'
-import type { BgmTrack, IllustrationWithLayers, Layer, Illustration } from '@/types/db'
+import type { BgmTrack, IllustrationWithLayers, Layer, Illustration, SoundEffect } from '@/types/db'
 import {
   deleteBgmTrack,
   deleteIllustration,
   deleteLayer,
+  deleteSoundEffect,
   getAllBgmTracks,
   getAllIllustrations,
+  getAllSoundEffects,
   getLayersByIllustration,
   saveBgmTrack,
   saveIllustration,
   saveLayer,
   saveLayersBatch,
+  saveSoundEffect,
 } from '@/lib/db'
 import { Sidebar } from '@/components/sidebar'
 
@@ -45,6 +49,11 @@ export default function EnvironmentPage() {
   const [bgmTracks, setBgmTracks] = useState<BgmTrack[]>([])
   const [bgmLoading, setBgmLoading] = useState(true)
   const bgmInputRef = useRef<HTMLInputElement | null>(null)
+
+  // SE state
+  const [sounds, setSounds] = useState<SoundEffect[]>([])
+  const [seLoading, setSeLoading] = useState(true)
+  const seInputRef = useRef<HTMLInputElement | null>(null)
 
   const selected = illustrations.find((i) => i.id === selectedId) ?? null
 
@@ -66,7 +75,54 @@ export default function EnvironmentPage() {
       .then(setBgmTracks)
       .catch((e) => console.error('[anime-app] load bgm failed', e))
       .finally(() => setBgmLoading(false))
+
+    getAllSoundEffects()
+      .then(setSounds)
+      .catch((e) => console.error('[anime-app] load se failed', e))
+      .finally(() => setSeLoading(false))
   }, [])
+
+  // ==================== SE handlers (BGMと同じ形) ====================
+
+  async function handleAddSeFiles(files: FileList | null) {
+    if (!files || files.length === 0) return
+    const now = new Date().toISOString()
+    const newItems: SoundEffect[] = []
+    for (const file of Array.from(files)) {
+      const duration = await readAudioDuration(file)
+      const se: SoundEffect = {
+        id: crypto.randomUUID(),
+        name: file.name.replace(/\.[^.]+$/, ''),
+        file_url: URL.createObjectURL(file),
+        file_blob: file,
+        duration,
+        created_at: now,
+      }
+      try {
+        await saveSoundEffect(se)
+        newItems.push(se)
+      } catch (e) {
+        console.error('[anime-app] save se failed', e)
+      }
+    }
+    setSounds((prev) => [...newItems, ...prev])
+  }
+
+  async function handleDeleteSe(id: string) {
+    if (!confirm('この効果音を削除してよろしいですか？(使用中のセリフからは自動で外れます)')) return
+    const target = sounds.find((t) => t.id === id)
+    if (target?.file_url.startsWith('blob:')) URL.revokeObjectURL(target.file_url)
+    await deleteSoundEffect(id)
+    setSounds((prev) => prev.filter((t) => t.id !== id))
+  }
+
+  async function handleRenameSe(id: string, name: string) {
+    const existing = sounds.find((t) => t.id === id)
+    if (!existing) return
+    const updated = { ...existing, name }
+    await saveSoundEffect(updated)
+    setSounds((prev) => prev.map((t) => (t.id === id ? updated : t)))
+  }
 
   // ==================== BGM handlers ====================
 
@@ -311,6 +367,10 @@ export default function EnvironmentPage() {
               <TabsTrigger value="bgm" className="gap-2">
                 <Music size={14} />
                 BGM
+              </TabsTrigger>
+              <TabsTrigger value="se" className="gap-2">
+                <Zap size={14} />
+                SE
               </TabsTrigger>
             </TabsList>
 
@@ -614,6 +674,79 @@ export default function EnvironmentPage() {
                           </span>
                           <button
                             onClick={() => handleDeleteBgm(track.id)}
+                            className="p-1.5 hover:bg-destructive/20 rounded transition"
+                            title="削除"
+                          >
+                            <Trash2 size={14} className="text-destructive" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="se" className="mt-6">
+              <Card className="bg-card border-border p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-foreground">効果音(SE)</h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      セリフの冒頭で鳴らす短いクリップ(ピコッ・ドンッ等)
+                    </p>
+                  </div>
+                  <div>
+                    <input
+                      ref={seInputRef}
+                      type="file"
+                      accept="audio/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        handleAddSeFiles(e.target.files)
+                        if (seInputRef.current) seInputRef.current.value = ''
+                      }}
+                    />
+                    <Button size="sm" onClick={() => seInputRef.current?.click()} className="gap-1">
+                      <Upload size={14} />
+                      SE追加
+                    </Button>
+                  </div>
+                </div>
+
+                {seLoading ? (
+                  <div className="text-center py-8 text-sm text-muted-foreground">
+                    読み込み中...
+                  </div>
+                ) : sounds.length === 0 ? (
+                  <div className="text-center py-10 text-sm text-muted-foreground">
+                    <Zap size={32} className="mx-auto mb-2 opacity-50" />
+                    効果音がまだありません。「SE追加」からアップロードしてください
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {sounds.map((se) => (
+                      <div
+                        key={se.id}
+                        className="flex items-center gap-3 p-3 bg-background rounded-lg border border-border"
+                      >
+                        <Zap size={18} className="text-primary flex-shrink-0" />
+                        <div className="flex-1 min-w-0 space-y-2">
+                          <Input
+                            type="text"
+                            value={se.name}
+                            onChange={(e) => handleRenameSe(se.id, e.target.value)}
+                            className="bg-card border-input h-8 text-sm"
+                          />
+                          <audio src={se.file_url} controls className="w-full h-8" />
+                        </div>
+                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                          <span className="text-xs text-muted-foreground tabular-nums">
+                            {formatDuration(se.duration)}
+                          </span>
+                          <button
+                            onClick={() => handleDeleteSe(se.id)}
                             className="p-1.5 hover:bg-destructive/20 rounded transition"
                             title="削除"
                           >

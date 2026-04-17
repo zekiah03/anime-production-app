@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar'
 import { SceneExportDialog } from '@/components/scene-export-dialog'
-import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack } from '@/types/db'
+import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue } from '@/types/db'
 import {
   deleteScene,
   deleteSceneDialogue,
@@ -19,6 +19,7 @@ import {
   getAllIllustrations,
   getAllSceneDialogues,
   getAllScenes,
+  getAllSoundEffects,
   getLayersByIllustration,
   saveScene,
   saveSceneDialogue,
@@ -41,6 +42,7 @@ export default function StoryboardPage() {
   const [expressions, setExpressions] = useState<CharacterExpression[]>([])
   const [illustrations, setIllustrations] = useState<IllustrationWithLayers[]>([])
   const [bgmTracks, setBgmTracks] = useState<BgmTrack[]>([])
+  const [sounds, setSounds] = useState<SoundEffect[]>([])
   const [loading, setLoading] = useState(true)
   const [showSceneForm, setShowSceneForm] = useState(false)
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null)
@@ -63,7 +65,7 @@ export default function StoryboardPage() {
 
   async function loadAll() {
     try {
-      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts, allBgm] = await Promise.all([
+      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts, allBgm, allSe] = await Promise.all([
         getAllScenes(),
         getAllSceneDialogues(),
         getAllDialogues(),
@@ -72,6 +74,7 @@ export default function StoryboardPage() {
         getAllExpressions(),
         getAllIllustrations(),
         getAllBgmTracks(),
+        getAllSoundEffects(),
       ])
       const withLayers: IllustrationWithLayers[] = await Promise.all(
         illusts.map(async (i) => ({
@@ -94,6 +97,7 @@ export default function StoryboardPage() {
       setExpressions(allExpressions)
       setIllustrations(withLayers)
       setBgmTracks(allBgm)
+      setSounds(allSe)
     } catch (e) {
       console.error('[anime-app] load storyboard failed', e)
     } finally {
@@ -189,11 +193,13 @@ export default function StoryboardPage() {
     const maxOrder = target.dialogues.reduce((max, d) => Math.max(max, d.order_index), -1)
     const dialogue = dialogues.find((d) => d.id === dialogueId) ?? null
 
-    const newSceneDialogue = {
+    const newSceneDialogue: SceneDialogue = {
       id: crypto.randomUUID(),
       scene_id: selectedSceneId,
       dialogue_id: dialogueId,
       order_index: maxOrder + 1,
+      se_id: null,
+      se_volume: 1,
       created_at: now,
     }
     await saveSceneDialogue(newSceneDialogue)
@@ -206,6 +212,36 @@ export default function StoryboardPage() {
       ),
     )
     setDialogueToAdd('')
+  }
+
+  // SceneDialogue の SE 設定を更新(UI操作のたびにローカル先行で反映、DBは fire-and-forget)
+  function updateSceneDialogueSe(sceneId: string, sdId: string, patch: Partial<Pick<SceneDialogue, 'se_id' | 'se_volume'>>) {
+    setScenes((prev) =>
+      prev.map((s) => {
+        if (s.id !== sceneId) return s
+        return {
+          ...s,
+          dialogues: s.dialogues.map((sd) => {
+            if (sd.id !== sdId) return sd
+            const merged = { ...sd, ...patch }
+            // 保存(dialogue は派生データなので取り除く)
+            const { dialogue: _drop, ...rowPart } = merged
+            void _drop
+            const row: SceneDialogue = {
+              id: rowPart.id,
+              scene_id: rowPart.scene_id,
+              dialogue_id: rowPart.dialogue_id,
+              order_index: rowPart.order_index,
+              se_id: rowPart.se_id ?? null,
+              se_volume: typeof rowPart.se_volume === 'number' ? rowPart.se_volume : 1,
+              created_at: rowPart.created_at,
+            }
+            saveSceneDialogue(row).catch((e) => console.error('[anime-app] save se on scene dialogue failed', e))
+            return merged
+          }),
+        }
+      }),
+    )
   }
 
   async function handleRemoveDialogue(sceneDialogueId: string) {
@@ -430,22 +466,68 @@ export default function StoryboardPage() {
                               <h5 className="font-medium text-foreground">シーン内のセリフ</h5>
                               {scene.dialogues && scene.dialogues.length > 0 ? (
                                 <div className="space-y-2">
-                                  {scene.dialogues.map((sd) => (
-                                    <div
-                                      key={sd.id}
-                                      className="flex items-start justify-between gap-2 p-2 bg-background rounded text-sm"
-                                    >
-                                      <div className="flex-1 min-w-0">
-                                        <p className="text-foreground break-words">{sd.dialogue?.text}</p>
-                                      </div>
-                                      <button
-                                        onClick={() => handleRemoveDialogue(sd.id)}
-                                        className="flex-shrink-0 p-1 hover:bg-destructive/20 rounded transition"
+                                  {scene.dialogues.map((sd) => {
+                                    const seVol = typeof sd.se_volume === 'number' ? sd.se_volume : 1
+                                    return (
+                                      <div
+                                        key={sd.id}
+                                        className="p-2 bg-background rounded text-sm space-y-2"
+                                        onClick={(e) => e.stopPropagation()}
                                       >
-                                        <Trash2 size={14} className="text-destructive" />
-                                      </button>
-                                    </div>
-                                  ))}
+                                        <div className="flex items-start justify-between gap-2">
+                                          <p className="text-foreground break-words flex-1 min-w-0">
+                                            {sd.dialogue?.text}
+                                          </p>
+                                          <button
+                                            onClick={() => handleRemoveDialogue(sd.id)}
+                                            className="flex-shrink-0 p-1 hover:bg-destructive/20 rounded transition"
+                                          >
+                                            <Trash2 size={14} className="text-destructive" />
+                                          </button>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-xs text-muted-foreground flex-shrink-0">SE</span>
+                                          <select
+                                            value={sd.se_id ?? ''}
+                                            onChange={(e) =>
+                                              updateSceneDialogueSe(scene.id, sd.id, {
+                                                se_id: e.target.value || null,
+                                              })
+                                            }
+                                            className="flex-1 min-w-0 px-2 py-1 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                          >
+                                            <option value="">なし</option>
+                                            {sounds.map((s) => (
+                                              <option key={s.id} value={s.id}>
+                                                {s.name}
+                                              </option>
+                                            ))}
+                                          </select>
+                                          {sd.se_id && (
+                                            <>
+                                              <input
+                                                type="range"
+                                                min={0}
+                                                max={1}
+                                                step={0.05}
+                                                value={seVol}
+                                                onChange={(e) =>
+                                                  updateSceneDialogueSe(scene.id, sd.id, {
+                                                    se_volume: Number(e.target.value),
+                                                  })
+                                                }
+                                                className="w-20 accent-primary"
+                                                title="SE音量"
+                                              />
+                                              <span className="text-xs text-muted-foreground w-8 tabular-nums flex-shrink-0">
+                                                {Math.round(seVol * 100)}%
+                                              </span>
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
                                 </div>
                               ) : (
                                 <p className="text-sm text-muted-foreground">セリフがありません</p>
@@ -567,6 +649,7 @@ export default function StoryboardPage() {
               bgmVolume={
                 playScene && typeof playScene.bgm_volume === 'number' ? playScene.bgm_volume : 0.25
               }
+              sounds={sounds}
               onClose={() => setPlayingSceneId(null)}
             />
             <SceneExportDialog
@@ -581,6 +664,7 @@ export default function StoryboardPage() {
                   ? exportScene.bgm_volume
                   : 0.25
               }
+              sounds={sounds}
               open={!!exportingSceneId}
               onClose={() => setExportingSceneId(null)}
             />
@@ -599,6 +683,8 @@ interface SceneDialogueResolved {
   audio: AudioFile | null
   expressionId: string | null
   charExpressions: CharacterExpression[]
+  se: SoundEffect | null
+  seVolume: number
 }
 
 function ScenePlayerDialog({
@@ -609,6 +695,7 @@ function ScenePlayerDialog({
   backgroundLayers,
   bgmTrack,
   bgmVolume,
+  sounds,
   onClose,
 }: {
   scene: SceneWithDialogues | null
@@ -618,11 +705,13 @@ function ScenePlayerDialog({
   backgroundLayers: Layer[]
   bgmTrack: BgmTrack | null
   bgmVolume: number
+  sounds: SoundEffect[]
   onClose: () => void
 }) {
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const bgmRef = useRef<HTMLAudioElement | null>(null)
+  const seRef = useRef<HTMLAudioElement | null>(null)
 
   // scene が変わったらリセット
   useEffect(() => {
@@ -643,6 +732,20 @@ function ScenePlayerDialog({
     }
   }, [playing, bgmTrack?.id, bgmVolume])
 
+  // SE: 現在のセリフが切り替わるたびに冒頭で oneshot 再生
+  useEffect(() => {
+    if (!playing) return
+    const current = queue[index]
+    if (!current?.se) return
+    const el = seRef.current
+    if (!el) return
+    el.src = current.se.file_url
+    el.volume = current.seVolume
+    el.currentTime = 0
+    el.play().catch((e) => console.warn('[anime-app] se play blocked', e))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index, playing, scene?.id])
+
   if (!scene) return null
 
   // 音声のあるセリフだけを再生対象にする
@@ -655,12 +758,16 @@ function ScenePlayerDialog({
       const charExpressions = character
         ? expressions.filter((x) => x.character_id === character.id)
         : []
+      const se = sd.se_id ? sounds.find((s) => s.id === sd.se_id) ?? null : null
+      const seVolume = typeof sd.se_volume === 'number' ? sd.se_volume : 1
       return {
         text: d.text,
         character,
         audio,
         expressionId: d.expression_id,
         charExpressions,
+        se,
+        seVolume,
       } satisfies SceneDialogueResolved
     })
     .filter((x): x is SceneDialogueResolved => x !== null && x.audio !== null && x.character !== null)
@@ -778,6 +885,8 @@ function ScenePlayerDialog({
           preload="auto"
           className="hidden"
         />
+        {/* SE: 各セリフの冒頭で oneshot 再生 */}
+        <audio ref={seRef} preload="auto" className="hidden" />
       </DialogContent>
     </Dialog>
   )

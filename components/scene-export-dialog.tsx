@@ -17,6 +17,7 @@ import type {
   CharacterExpression,
   Layer,
   SceneWithDialogues,
+  SoundEffect,
 } from '@/types/db'
 
 interface ResolvedDialogue {
@@ -27,6 +28,8 @@ interface ResolvedDialogue {
   mouthClosed: CharacterExpression | null
   blink: CharacterExpression | null
   override: CharacterExpression | null
+  se: SoundEffect | null
+  seVolume: number
 }
 
 // 書き出し解像度は縦型ショート動画を意識した 9:16。将来 UI で切替可能にしてもよい。
@@ -45,6 +48,7 @@ export function SceneExportDialog({
   backgroundLayers,
   bgmTrack,
   bgmVolume,
+  sounds,
   open,
   onClose,
 }: {
@@ -55,6 +59,7 @@ export function SceneExportDialog({
   backgroundLayers: Layer[]
   bgmTrack: BgmTrack | null
   bgmVolume: number
+  sounds: SoundEffect[]
   open: boolean
   onClose: () => void
 }) {
@@ -75,6 +80,8 @@ export function SceneExportDialog({
           const audio = audioFiles.find((a) => a.id === d.audio_id) ?? null
           if (!character || !audio) return null
           const charExpressions = expressions.filter((x) => x.character_id === character.id)
+          const se = sd.se_id ? sounds.find((s) => s.id === sd.se_id) ?? null : null
+          const seVolume = typeof sd.se_volume === 'number' ? sd.se_volume : 1
           return {
             text: d.text,
             character,
@@ -85,6 +92,8 @@ export function SceneExportDialog({
             override: d.expression_id
               ? charExpressions.find((x) => x.id === d.expression_id) ?? null
               : null,
+            se,
+            seVolume,
           } as ResolvedDialogue
         })
         .filter((x): x is ResolvedDialogue => x !== null)
@@ -336,6 +345,35 @@ export function SceneExportDialog({
         analyser.connect(destination)
         analyser.connect(audioCtx.destination) // プレビュー用スピーカー出力
 
+        // SE: セリフ冒頭で oneshot 再生(AudioContext 経由で destination にミックス)
+        let seEl: HTMLAudioElement | null = null
+        let seSource: MediaElementAudioSourceNode | null = null
+        let seGain: GainNode | null = null
+        if (current.se?.file_url) {
+          seEl = new Audio()
+          seEl.src = current.se.file_url
+          seEl.preload = 'auto'
+          try {
+            await new Promise<void>((resolve, reject) => {
+              if (!seEl) return resolve()
+              const onReady = () => resolve()
+              const onErr = () => reject(new Error('SE の読み込みに失敗'))
+              seEl.addEventListener('canplaythrough', onReady, { once: true })
+              seEl.addEventListener('error', onErr, { once: true })
+              seEl.load()
+            })
+            seSource = audioCtx.createMediaElementSource(seEl)
+            seGain = audioCtx.createGain()
+            seGain.gain.value = current.seVolume
+            seSource.connect(seGain)
+            seGain.connect(destination)
+            seGain.connect(audioCtx.destination)
+          } catch (e) {
+            console.warn('[anime-app] se setup failed', e)
+            seEl = null
+          }
+        }
+
         const freq = new Uint8Array(analyser.frequencyBinCount)
         let mouthOpen = false
         let lastTick = performance.now()
@@ -352,6 +390,11 @@ export function SceneExportDialog({
             once: true,
           })
           audioEl.play().catch(reject)
+          // SE はセリフとほぼ同時に鳴らす(oneshot、終了は自然停止)
+          if (seEl) {
+            seEl.currentTime = 0
+            seEl.play().catch((e) => console.warn('[anime-app] se play blocked', e))
+          }
 
           const tick = (now: number) => {
             if (cancelledRef.current) {
@@ -383,8 +426,14 @@ export function SceneExportDialog({
         try {
           source.disconnect()
           analyser.disconnect()
+          seSource?.disconnect()
+          seGain?.disconnect()
         } catch (e) {
           console.warn('[anime-app] disconnect warn', e)
+        }
+        if (seEl) {
+          seEl.pause()
+          seEl.src = ''
         }
         audioEl.src = ''
       }

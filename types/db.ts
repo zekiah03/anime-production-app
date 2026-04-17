@@ -72,6 +72,19 @@ export interface SceneDialogue {
   scene_id: string
   dialogue_id: string
   order_index: number
+  // 各セリフの冒頭で鳴らす効果音(SE)。未指定ならなし
+  se_id: string | null
+  se_volume: number // 0..1(未指定なら 1.0 を既定にする)
+  created_at: string
+}
+
+// 効果音(ピコッ/ドンッ等の短い oneshot クリップ)
+export interface SoundEffect {
+  id: string
+  name: string
+  file_url: string // blob URL (derived)
+  file_blob?: Blob
+  duration: number | null
   created_at: string
 }
 
