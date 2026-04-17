@@ -14,7 +14,9 @@ import {
   DEFAULT_TELOP_STYLE,
   TELOP_FONT_FAMILY,
   type TelopFont,
+  type TelopIntro,
   type TelopPosition,
+  type TelopShake,
   type TelopStyle,
 } from '@/types/db'
 
@@ -28,6 +30,19 @@ const POSITION_LABEL: Record<TelopPosition, string> = {
   top: '上',
   center: '中央',
   bottom: '下',
+}
+
+const INTRO_LABEL: Record<TelopIntro, string> = {
+  none: 'なし',
+  pop: 'ポップイン',
+  typewriter: 'タイプライタ',
+  fade: 'フェードイン',
+}
+
+const SHAKE_LABEL: Record<TelopShake, string> = {
+  none: 'なし',
+  subtle: '微',
+  heavy: '強',
 }
 
 export function TelopSettingsDialog({
@@ -74,7 +89,7 @@ export function TelopSettingsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* プレビュー */}
+        {/* プレビュー(スタイル変更で intro アニメが再実行される) */}
         <div
           className="relative w-full rounded-md bg-neutral-800 overflow-hidden border border-border"
           style={{ aspectRatio: '16 / 9' }}
@@ -90,8 +105,28 @@ export function TelopSettingsDialog({
             }}
           >
             <div className="mx-auto max-w-[95%] text-center">
-              <span className="inline-block" style={previewBandStyle}>
-                <span style={previewTextStyle}>ここにセリフが入ります</span>
+              <span
+                key={`${style.intro}-${style.position}-${style.size}-${style.color}-${style.band_color}-${style.band_opacity}-${style.stroke_width}-${style.stroke_color}-${style.font}-${style.bold}`}
+                className={`inline-block ${
+                  style.intro === 'pop'
+                    ? 'telop-intro-pop'
+                    : style.intro === 'fade'
+                      ? 'telop-intro-fade'
+                      : ''
+                }`.trim()}
+                style={previewBandStyle}
+              >
+                <span
+                  className={
+                    style.shake === 'subtle'
+                      ? 'telop-shake-subtle'
+                      : style.shake === 'heavy'
+                        ? 'telop-shake-heavy'
+                        : undefined
+                  }
+                >
+                  <span style={previewTextStyle}>ここにセリフが入ります</span>
+                </span>
               </span>
             </div>
           </div>
@@ -227,6 +262,56 @@ export function TelopSettingsDialog({
               className="w-full accent-primary"
             />
           </Field>
+
+          {/* 登場アニメ */}
+          <Field label="登場アニメ">
+            <select
+              value={style.intro}
+              onChange={(e) => update('intro', e.target.value as TelopIntro)}
+              className="w-full px-3 py-2 bg-background border border-input rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              {(Object.keys(INTRO_LABEL) as TelopIntro[]).map((k) => (
+                <option key={k} value={k}>
+                  {INTRO_LABEL[k]}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {/* 振動 */}
+          <Field label="振動">
+            <div className="flex gap-1">
+              {(Object.keys(SHAKE_LABEL) as TelopShake[]).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => update('shake', k)}
+                  className={`flex-1 px-3 py-2 text-sm rounded-md border transition ${
+                    style.shake === k
+                      ? 'bg-primary/20 border-primary/40 text-primary'
+                      : 'bg-background border-input text-foreground hover:bg-primary/10'
+                  }`}
+                >
+                  {SHAKE_LABEL[k]}
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          {/* タイプ速度(typewriter 選択時のみ) */}
+          {style.intro === 'typewriter' && (
+            <Field label={`タイプ速度: ${style.typewriter_cps} 文字/秒`}>
+              <input
+                type="range"
+                min={5}
+                max={80}
+                step={1}
+                value={style.typewriter_cps}
+                onChange={(e) => update('typewriter_cps', Number(e.target.value))}
+                className="w-full accent-primary"
+              />
+            </Field>
+          )}
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">

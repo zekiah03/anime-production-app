@@ -70,6 +70,50 @@ export function LipSyncStage({
   const effectiveStyle = telopStyle ?? DEFAULT_TELOP_STYLE
   const cx = typeof characterX === 'number' ? characterX : 0.5
   const cs = typeof characterScale === 'number' ? characterScale : 1.0
+
+  // typewriter の段階表示用(intro=typewriter 以外のときは常に全文)
+  const [revealedText, setRevealedText] = useState<string>(caption ?? '')
+  useEffect(() => {
+    if (!caption || !playing) {
+      setRevealedText(caption ?? '')
+      return
+    }
+    if (effectiveStyle.intro !== 'typewriter') {
+      setRevealedText(caption)
+      return
+    }
+    const cps = effectiveStyle.typewriter_cps > 0 ? effectiveStyle.typewriter_cps : 30
+    const start = performance.now()
+    let raf = 0
+    let cancelled = false
+    const tick = (now: number) => {
+      if (cancelled) return
+      const chars = Math.min(caption.length, Math.floor(((now - start) / 1000) * cps))
+      setRevealedText(caption.slice(0, chars))
+      if (chars < caption.length) {
+        raf = requestAnimationFrame(tick)
+      }
+    }
+    setRevealedText('')
+    raf = requestAnimationFrame(tick)
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(raf)
+    }
+  }, [caption, playing, effectiveStyle.intro, effectiveStyle.typewriter_cps])
+
+  const introClass =
+    effectiveStyle.intro === 'pop'
+      ? 'telop-intro-pop'
+      : effectiveStyle.intro === 'fade'
+        ? 'telop-intro-fade'
+        : ''
+  const shakeClass =
+    effectiveStyle.shake === 'subtle'
+      ? 'telop-shake-subtle'
+      : effectiveStyle.shake === 'heavy'
+        ? 'telop-shake-heavy'
+        : ''
   const [mouthOpen, setMouthOpen] = useState(false)
   const [blinking, setBlinking] = useState(false)
 
@@ -297,8 +341,14 @@ export function LipSyncStage({
           }}
         >
           <div className="mx-auto max-w-[95%] text-center">
-            <span className="inline-block" style={toBandStyle(effectiveStyle)}>
-              <span style={toTextStyle(effectiveStyle)}>{caption}</span>
+            <span
+              key={caption /* 新しいセリフに入れ替わったら intro アニメを再実行させる */}
+              className={`inline-block ${introClass}`.trim()}
+              style={toBandStyle(effectiveStyle)}
+            >
+              <span className={shakeClass || undefined}>
+                <span style={toTextStyle(effectiveStyle)}>{revealedText}</span>
+              </span>
             </span>
           </div>
         </div>

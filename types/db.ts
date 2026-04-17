@@ -5,6 +5,8 @@
 
 export type TelopFont = 'gothic' | 'mincho' | 'rounded'
 export type TelopPosition = 'top' | 'center' | 'bottom'
+export type TelopIntro = 'none' | 'pop' | 'typewriter' | 'fade'
+export type TelopShake = 'none' | 'subtle' | 'heavy'
 
 export interface TelopStyle {
   font: TelopFont
@@ -16,6 +18,9 @@ export interface TelopStyle {
   band_opacity: number // 0..1
   position: TelopPosition
   bold: boolean
+  intro: TelopIntro
+  shake: TelopShake
+  typewriter_cps: number // chars per second for typewriter intro
 }
 
 export const DEFAULT_TELOP_STYLE: TelopStyle = {
@@ -28,6 +33,9 @@ export const DEFAULT_TELOP_STYLE: TelopStyle = {
   band_opacity: 0.72,
   position: 'bottom',
   bold: true,
+  intro: 'none',
+  shake: 'none',
+  typewriter_cps: 30,
 }
 
 export const TELOP_FONT_FAMILY: Record<TelopFont, string> = {

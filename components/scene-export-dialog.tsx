@@ -19,10 +19,33 @@ import type {
   SceneCastMember,
   SceneWithDialogues,
   SoundEffect,
+  TelopShake,
   TelopStyle,
 } from '@/types/db'
 import { DEFAULT_TELOP_STYLE, TELOP_FONT_FAMILY } from '@/types/db'
 import { hexToRgba } from '@/components/telop-settings-dialog'
+
+// ポップイン: CSS keyframes(0→0.3, 60%→1.1, 100%→1.0)を近似
+function easePop(t: number): number {
+  if (t <= 0) return 0.3
+  if (t >= 1) return 1
+  if (t < 0.6) {
+    const u = t / 0.6
+    return 0.3 + (1.1 - 0.3) * (1 - (1 - u) * (1 - u))
+  }
+  const u = (t - 0.6) / 0.4
+  return 1.1 - 0.1 * u
+}
+
+function computeShake(kind: TelopShake, elapsedMs: number): { x: number; y: number } {
+  if (kind === 'none') return { x: 0, y: 0 }
+  const amplitude = kind === 'heavy' ? 3 : 1
+  const t = elapsedMs / 40 // コマ感のある周期
+  return {
+    x: Math.sin(t * 2.3) * amplitude,
+    y: Math.cos(t * 3.1) * amplitude,
+  }
+}
 
 interface ExportExtra {
   character: Character
@@ -189,6 +212,7 @@ export function SceneExportDialog({
     cache: Map<string, HTMLImageElement>,
     mouthOpen: boolean,
     blinking: boolean,
+    elapsedMs: number,
   ) {
     ctx.fillStyle = '#111111'
     ctx.fillRect(0, 0, WIDTH, HEIGHT)
@@ -261,46 +285,76 @@ export function SceneExportDialog({
 
     if (current.text) {
       const style = effectiveStyle
-      const fontSize = style.size
-      const weight = style.bold ? 'bold ' : ''
-      ctx.font = `${weight}${fontSize}px ${TELOP_FONT_FAMILY[style.font]}`
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'bottom'
+      // タイプライタ: 時間に応じて表示文字数を増やす
+      const visibleText =
+        style.intro === 'typewriter'
+          ? current.text.slice(
+              0,
+              Math.floor((elapsedMs / 1000) * (style.typewriter_cps > 0 ? style.typewriter_cps : 30)),
+            )
+          : current.text
+      if (visibleText) {
+        const fadeAlpha = style.intro === 'fade' ? Math.min(1, elapsedMs / 240) : 1
+        const popScale = style.intro === 'pop' ? easePop(elapsedMs / 280) : 1
+        const shake = computeShake(style.shake, elapsedMs)
 
-      const maxBandWidth = WIDTH - 80
-      const metrics = ctx.measureText(current.text)
-      const padX = 28
-      const padY = 18
-      const bandWidth = Math.min(maxBandWidth, metrics.width + padX * 2)
-      const bandHeight = fontSize + padY * 2
-      const bandX = (WIDTH - bandWidth) / 2
+        const fontSize = style.size
+        const weight = style.bold ? 'bold ' : ''
+        ctx.font = `${weight}${fontSize}px ${TELOP_FONT_FAMILY[style.font]}`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'bottom'
 
-      // 位置: top / center / bottom
-      let bandY: number
-      if (style.position === 'top') {
-        bandY = 60
-      } else if (style.position === 'center') {
-        bandY = (HEIGHT - bandHeight) / 2
-      } else {
-        bandY = HEIGHT - bandHeight - 60
+        const maxBandWidth = WIDTH - 80
+        const metrics = ctx.measureText(visibleText)
+        const padX = 28
+        const padY = 18
+        const bandWidth = Math.min(maxBandWidth, metrics.width + padX * 2)
+        const bandHeight = fontSize + padY * 2
+        const bandX = (WIDTH - bandWidth) / 2
+
+        // 位置: top / center / bottom
+        let bandY: number
+        if (style.position === 'top') {
+          bandY = 60
+        } else if (style.position === 'center') {
+          bandY = (HEIGHT - bandHeight) / 2
+        } else {
+          bandY = HEIGHT - bandHeight - 60
+        }
+
+        ctx.save()
+        ctx.globalAlpha = fadeAlpha
+        // ポップ: 中心基準でスケール
+        if (popScale !== 1) {
+          const cxp = bandX + bandWidth / 2
+          const cyp = bandY + bandHeight / 2
+          ctx.translate(cxp, cyp)
+          ctx.scale(popScale, popScale)
+          ctx.translate(-cxp, -cyp)
+        }
+        // 振動オフセット
+        if (shake.x !== 0 || shake.y !== 0) {
+          ctx.translate(shake.x, shake.y)
+        }
+
+        ctx.fillStyle = hexToRgba(style.band_color, style.band_opacity)
+        ctx.beginPath()
+        ctx.roundRect(bandX, bandY, bandWidth, bandHeight, 14)
+        ctx.fill()
+
+        const textY = bandY + bandHeight - padY
+        if (style.stroke_width > 0) {
+          ctx.lineWidth = style.stroke_width
+          ctx.strokeStyle = style.stroke_color
+          ctx.lineJoin = 'round'
+          ctx.miterLimit = 2
+          ctx.strokeText(visibleText, WIDTH / 2, textY)
+        }
+        ctx.fillStyle = style.color
+        ctx.fillText(visibleText, WIDTH / 2, textY)
+
+        ctx.restore()
       }
-
-      ctx.fillStyle = hexToRgba(style.band_color, style.band_opacity)
-      ctx.beginPath()
-      ctx.roundRect(bandX, bandY, bandWidth, bandHeight, 14)
-      ctx.fill()
-
-      const textY = bandY + bandHeight - padY
-      if (style.stroke_width > 0) {
-        ctx.lineWidth = style.stroke_width
-        ctx.strokeStyle = style.stroke_color
-        // 縁取りが太いときはなめらかに見えるように線を先に打つ
-        ctx.lineJoin = 'round'
-        ctx.miterLimit = 2
-        ctx.strokeText(current.text, WIDTH / 2, textY)
-      }
-      ctx.fillStyle = style.color
-      ctx.fillText(current.text, WIDTH / 2, textY)
     }
   }
 
@@ -531,7 +585,7 @@ export function SceneExportDialog({
                 blinkEndAt = now + 80
               }
             }
-            drawFrame(ctx, current, imageCache, mouthOpen, blinking)
+            drawFrame(ctx, current, imageCache, mouthOpen, blinking, now - startAt)
             raf = requestAnimationFrame(tick)
           }
           raf = requestAnimationFrame(tick)
