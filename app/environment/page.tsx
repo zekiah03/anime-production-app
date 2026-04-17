@@ -20,6 +20,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { generateSampleBgmTracks, generateSampleSoundEffects } from '@/lib/sample-audio'
+import { generateSampleIllustrations } from '@/lib/sample-images'
 import type { BgmTrack, IllustrationWithLayers, Layer, Illustration, SoundEffect } from '@/types/db'
 import {
   deleteBgmTrack,
@@ -60,6 +61,8 @@ export default function EnvironmentPage() {
   // サンプル生成中フラグ
   const [seedingBgm, setSeedingBgm] = useState(false)
   const [seedingSe, setSeedingSe] = useState(false)
+  const [seedingIllust, setSeedingIllust] = useState(false)
+  const illustImageInputRef = useRef<HTMLInputElement | null>(null)
 
   const selected = illustrations.find((i) => i.id === selectedId) ?? null
 
@@ -185,6 +188,80 @@ export default function EnvironmentPage() {
       alert('SEサンプル生成に失敗しました')
     } finally {
       setSeedingSe(false)
+    }
+  }
+
+  // 複数ファイルをまとめて取り込む: 1ファイル = 1イラスト(1レイヤー)
+  async function handleQuickAddImages(files: FileList | null) {
+    if (!files || files.length === 0) return
+    const now = new Date().toISOString()
+    const created: IllustrationWithLayers[] = []
+    for (const file of Array.from(files)) {
+      const name = file.name.replace(/\.[^.]+$/, '')
+      const illust: Illustration = {
+        id: crypto.randomUUID(),
+        name,
+        created_at: now,
+        updated_at: now,
+      }
+      try {
+        await saveIllustration(illust)
+        const layer: Layer = {
+          id: crypto.randomUUID(),
+          illustration_id: illust.id,
+          name,
+          image_url: URL.createObjectURL(file),
+          image_blob: file,
+          visible: true,
+          opacity: 1,
+          order_index: 0,
+          created_at: now,
+        }
+        await saveLayer(layer)
+        created.push({ ...illust, layers: [layer] })
+      } catch (e) {
+        console.error('[anime-app] quick add image failed', e)
+      }
+    }
+    setIllustrations((prev) => [...created, ...prev])
+    if (created[0]) setSelectedId(created[0].id)
+  }
+
+  async function handleSeedIllustrations() {
+    if (seedingIllust) return
+    setSeedingIllust(true)
+    try {
+      const samples = await generateSampleIllustrations()
+      const now = new Date().toISOString()
+      const created: IllustrationWithLayers[] = []
+      for (const s of samples) {
+        const illust: Illustration = {
+          id: crypto.randomUUID(),
+          name: s.name,
+          created_at: now,
+          updated_at: now,
+        }
+        await saveIllustration(illust)
+        const layer: Layer = {
+          id: crypto.randomUUID(),
+          illustration_id: illust.id,
+          name: s.name,
+          image_url: URL.createObjectURL(s.blob),
+          image_blob: s.blob,
+          visible: true,
+          opacity: 1,
+          order_index: 0,
+          created_at: now,
+        }
+        await saveLayer(layer)
+        created.push({ ...illust, layers: [layer] })
+      }
+      setIllustrations((prev) => [...created, ...prev])
+    } catch (e) {
+      console.error('[anime-app] seed illustrations failed', e)
+      alert('背景サンプル生成に失敗しました')
+    } finally {
+      setSeedingIllust(false)
     }
   }
 
@@ -438,7 +515,50 @@ export default function EnvironmentPage() {
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="images" className="mt-6">
+            <TabsContent value="images" className="mt-6 space-y-4">
+              <Card className="bg-card border-border p-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h3 className="text-lg font-semibold text-foreground">画像・背景素材</h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      背景・小物などキャラ非依存の素材を管理(複数レイヤーで構成可)
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      ref={illustImageInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        handleQuickAddImages(e.target.files)
+                        if (illustImageInputRef.current) illustImageInputRef.current.value = ''
+                      }}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleSeedIllustrations}
+                      disabled={seedingIllust}
+                      className="gap-1"
+                      title="Canvas で合成した権利フリーの背景サンプルを追加します"
+                    >
+                      <Sparkles size={14} />
+                      {seedingIllust ? '生成中…' : 'サンプル追加'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => illustImageInputRef.current?.click()}
+                      className="gap-1"
+                      title="画像ファイルを複数選ぶと、それぞれ1レイヤーの素材として一括追加されます"
+                    >
+                      <Upload size={14} />
+                      画像追加
+                    </Button>
+                  </div>
+                </div>
+              </Card>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div>
               <Card className="bg-card border-border p-6">
