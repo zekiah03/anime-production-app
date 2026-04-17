@@ -102,6 +102,9 @@ export default function StoryboardPage() {
   const [telopStyle, setTelopStyle] = useState<TelopStyle>(DEFAULT_TELOP_STYLE)
   const [showTelopSettings, setShowTelopSettings] = useState(false)
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false)
+  // スクリプト一括貼り付け(テキスト → 複数セリフ)
+  const [bulkScriptSceneId, setBulkScriptSceneId] = useState<string | null>(null)
+  const [bulkScriptText, setBulkScriptText] = useState('')
   // ナレーション追加フォーム(展開中のシーンに対して使う)
   const [narrationText, setNarrationText] = useState('')
   const [narrationAudioId, setNarrationAudioId] = useState('')
@@ -262,6 +265,112 @@ export default function StoryboardPage() {
     )
     // 削除後は先頭の動画を選択(なければ null = 未分類)
     setSelectedVideoId(videos.find((v) => v.id !== id)?.id ?? null)
+  }
+
+  // 動画まるごと複製: 動画行 + 所属シーン全て(キャスト・セリフ構成つき)を新 id で複製
+  async function handleDuplicateVideo(id: string) {
+    const source = videos.find((v) => v.id === id)
+    if (!source) return
+    if (!window.confirm(`動画「${source.name}」を、全シーンごと複製しますか?`)) return
+    const now = new Date().toISOString()
+    const newVideo: Video = {
+      id: crypto.randomUUID(),
+      name: source.name + ' (コピー)',
+      order_index: videos.length,
+      created_at: now,
+      updated_at: now,
+    }
+    await saveVideo(newVideo)
+
+    const sceneList = scenes
+      .filter((s) => (s.video_id ?? null) === id)
+      .sort((a, b) => a.order_index - b.order_index)
+    const newScenes: SceneWithDialogues[] = []
+    const newCast: SceneCastMember[] = []
+
+    for (const src of sceneList) {
+      const newSceneId = crypto.randomUUID()
+      const newScene: Scene = {
+        id: newSceneId,
+        title: src.title,
+        description: src.description,
+        background_illustration_id: src.background_illustration_id,
+        bgm_track_id: src.bgm_track_id,
+        bgm_volume: src.bgm_volume,
+        video_id: newVideo.id,
+        order_index: src.order_index,
+        created_at: now,
+        updated_at: now,
+      }
+      await saveScene(newScene)
+
+      const srcCast = cast.filter((c) => c.scene_id === src.id)
+      const copiedCast: SceneCastMember[] = srcCast.map((c) => ({
+        ...c,
+        id: crypto.randomUUID(),
+        scene_id: newSceneId,
+        created_at: now,
+      }))
+      await Promise.all(copiedCast.map((c) => saveSceneCastMember(c)))
+      newCast.push(...copiedCast)
+
+      const copiedSds = src.dialogues.map((sd) => ({
+        id: crypto.randomUUID(),
+        scene_id: newSceneId,
+        dialogue_id: sd.dialogue_id,
+        order_index: sd.order_index,
+        se_id: sd.se_id ?? null,
+        se_volume: typeof sd.se_volume === 'number' ? sd.se_volume : 1,
+        character_x: typeof sd.character_x === 'number' ? sd.character_x : 0.5,
+        character_scale:
+          typeof sd.character_scale === 'number' ? sd.character_scale : 1.0,
+        character_flipped: sd.character_flipped ?? false,
+        pause_after_ms: typeof sd.pause_after_ms === 'number' ? sd.pause_after_ms : 0,
+        created_at: now,
+        dialogue: sd.dialogue,
+      }))
+      await Promise.all(
+        copiedSds.map((sd) => {
+          const { dialogue: _d, ...row } = sd
+          void _d
+          return saveSceneDialogue(row)
+        }),
+      )
+      newScenes.push({ ...newScene, dialogues: copiedSds })
+    }
+
+    setVideos((prev) => [...prev, newVideo])
+    setScenes((prev) => [...prev, ...newScenes])
+    setCast((prev) => [...prev, ...newCast])
+    setSelectedVideoId(newVideo.id)
+  }
+
+  // シーンを別動画へ移動
+  async function handleMoveSceneToVideo(sceneId: string, targetVideoId: string | null) {
+    const src = scenes.find((s) => s.id === sceneId)
+    if (!src) return
+    if ((src.video_id ?? null) === targetVideoId) return
+    const now = new Date().toISOString()
+    // 移動先の末尾に付ける
+    const maxOrder = scenes
+      .filter((s) => (s.video_id ?? null) === targetVideoId)
+      .reduce((m, s) => Math.max(m, s.order_index), -1)
+    const updated: Scene = {
+      id: src.id,
+      title: src.title,
+      description: src.description,
+      background_illustration_id: src.background_illustration_id,
+      bgm_track_id: src.bgm_track_id,
+      bgm_volume: src.bgm_volume,
+      video_id: targetVideoId,
+      order_index: maxOrder + 1,
+      created_at: src.created_at,
+      updated_at: now,
+    }
+    await saveScene(updated)
+    setScenes((prev) =>
+      prev.map((s) => (s.id === sceneId ? { ...updated, dialogues: s.dialogues } : s)),
+    )
   }
 
   // シーン複製: Scene 本体 + その scene_cast + scene_dialogues を新 id で複製(Dialogue は共有)
@@ -880,6 +989,101 @@ export default function StoryboardPage() {
     setNarrationAudioId('')
   }
 
+  // スクリプト一括貼り付けを適用: 各行 = 1セリフ。
+  //   「キャラ名: セリフ」「キャラ名:セリフ」「キャラ名「セリフ」」 → そのキャラのセリフ
+  //   それ以外の行 → ナレーション(キャラなし)
+  // 対応する Character が無い行はナレーション扱い。
+  async function handleApplyBulkScript() {
+    if (!bulkScriptSceneId) return
+    const text = bulkScriptText
+    const scene = scenes.find((s) => s.id === bulkScriptSceneId)
+    if (!scene) return
+    const lines = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+    if (lines.length === 0) {
+      setBulkScriptSceneId(null)
+      setBulkScriptText('')
+      return
+    }
+    const now = new Date().toISOString()
+    let order = scene.dialogues.reduce((m, sd) => Math.max(m, sd.order_index), -1)
+    const newDialogues: Dialogue[] = []
+    const newSds: (SceneDialogue & { dialogue: Dialogue })[] = []
+
+    // キャラ名解決: 完全一致優先、無ければ前方一致
+    const findCharByName = (name: string): Character | null => {
+      const trimmed = name.trim()
+      if (!trimmed) return null
+      const exact = characters.find((c) => c.name === trimmed)
+      if (exact) return exact
+      const prefix = characters.find((c) => trimmed.startsWith(c.name))
+      return prefix ?? null
+    }
+
+    for (const raw of lines) {
+      // 「キャラ「セリフ」」形式
+      let charName: string | null = null
+      let body = raw
+      const kagiMatch = raw.match(/^([^「：:]+)[「](.+?)[」]$/)
+      const colonMatch = raw.match(/^([^：:]+)[：:]\s*(.+)$/)
+      if (kagiMatch) {
+        charName = kagiMatch[1]
+        body = kagiMatch[2]
+      } else if (colonMatch) {
+        charName = colonMatch[1]
+        body = colonMatch[2]
+      }
+      const character = charName ? findCharByName(charName) : null
+      const isNarration = !character
+
+      const dialogue: Dialogue = {
+        id: crypto.randomUUID(),
+        text: body,
+        character_id: character?.id ?? null,
+        audio_id: null,
+        expression_id: null,
+        emotion: null,
+        notes: isNarration ? 'narration' : null,
+        // 音声なしの場合は概算(1文字あたり 120ms、最小 1.5s、最大 8s)
+        duration_ms: Math.min(8000, Math.max(1500, body.length * 120)),
+        created_at: now,
+        updated_at: now,
+      }
+      await saveDialogue(dialogue)
+      newDialogues.push(dialogue)
+
+      order += 1
+      const sd: SceneDialogue = {
+        id: crypto.randomUUID(),
+        scene_id: bulkScriptSceneId,
+        dialogue_id: dialogue.id,
+        order_index: order,
+        se_id: null,
+        se_volume: 1,
+        character_x: 0.5,
+        character_scale: 1.0,
+        character_flipped: false,
+        pause_after_ms: 0,
+        created_at: now,
+      }
+      await saveSceneDialogue(sd)
+      newSds.push({ ...sd, dialogue })
+    }
+
+    setDialogues((prev) => [...newDialogues, ...prev])
+    setScenes((prev) =>
+      prev.map((s) =>
+        s.id === bulkScriptSceneId
+          ? { ...s, dialogues: [...s.dialogues, ...newSds] }
+          : s,
+      ),
+    )
+    setBulkScriptSceneId(null)
+    setBulkScriptText('')
+  }
+
   function backgroundLayersForScene(scene: Scene): Layer[] {
     if (!scene.background_illustration_id) return []
     const illust = illustrations.find((i) => i.id === scene.background_illustration_id)
@@ -1249,6 +1453,14 @@ export default function StoryboardPage() {
                         title="名前変更"
                       >
                         <Pencil size={11} className="text-muted-foreground" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDuplicateVideo(v.id)}
+                        className="p-1 hover:bg-primary/20 rounded transition"
+                        title="動画ごと複製(シーン・キャスト・セリフ構成つき)"
+                      >
+                        <Copy size={11} className="text-muted-foreground" />
                       </button>
                       <button
                         type="button"
@@ -2302,6 +2514,17 @@ export default function StoryboardPage() {
                                 >
                                   追加
                                 </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setBulkScriptSceneId(scene.id)
+                                    setBulkScriptText('')
+                                  }}
+                                  title="複数行のテキストを貼り付けて一括でセリフ化(「キャラ名: セリフ」の形式を認識)"
+                                >
+                                  スクリプト貼付
+                                </Button>
                               </div>
                               {/* ナレーション追加(キャラなし字幕) */}
                               <div className="space-y-2 p-2 bg-background rounded border border-dashed border-border">
@@ -2408,6 +2631,24 @@ export default function StoryboardPage() {
                           >
                             <Copy size={16} className="text-primary" />
                           </button>
+                          <select
+                            value={scene.video_id ?? ''}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              e.stopPropagation()
+                              const next = e.target.value || null
+                              handleMoveSceneToVideo(scene.id, next)
+                            }}
+                            className="text-xs bg-background border border-input rounded px-1 py-1 text-muted-foreground hover:text-foreground cursor-pointer"
+                            title="別の動画へ移動"
+                          >
+                            <option value="">未分類</option>
+                            {videos.map((v) => (
+                              <option key={v.id} value={v.id}>
+                                → {v.name}
+                              </option>
+                            ))}
+                          </select>
                           <button
                             onClick={() => handleEditScene(scene)}
                             className="p-2 hover:bg-primary/20 rounded-lg transition"
@@ -2710,6 +2951,62 @@ export default function StoryboardPage() {
               }}
               onClose={() => setShowTelopSettings(false)}
             />
+            {/* スクリプト一括貼り付け */}
+            <Dialog
+              open={!!bulkScriptSceneId}
+              onOpenChange={(o) => {
+                if (!o) {
+                  setBulkScriptSceneId(null)
+                  setBulkScriptText('')
+                }
+              }}
+            >
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>スクリプト一括貼り付け</DialogTitle>
+                  <DialogDescription>
+                    1行=1セリフで一括追加します。「キャラ名: セリフ」か「キャラ名「セリフ」」の形式だと、そのキャラのセリフとして登録。それ以外はナレーション扱い。
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <textarea
+                    value={bulkScriptText}
+                    onChange={(e) => setBulkScriptText(e.target.value)}
+                    placeholder={'例:\nアリス: おはよう!\nボブ: やあ。今日もいい天気だね。\nそして二人は歩き出した。'}
+                    rows={10}
+                    className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary font-mono"
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    {(() => {
+                      const lines = bulkScriptText
+                        .split(/\r?\n/)
+                        .map((l) => l.trim())
+                        .filter((l) => l.length > 0)
+                      return `${lines.length} 行を追加します`
+                    })()}
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setBulkScriptSceneId(null)
+                        setBulkScriptText('')
+                      }}
+                    >
+                      キャンセル
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleApplyBulkScript}
+                      disabled={bulkScriptText.trim().length === 0}
+                    >
+                      追加する
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
             {/* ショートカットヘルプ(? キーで開閉) */}
             <Dialog open={showShortcutsHelp} onOpenChange={(o) => setShowShortcutsHelp(o)}>
               <DialogContent className="max-w-md">
