@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward } from 'lucide-react'
+import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar'
+import { SceneExportDialog } from '@/components/scene-export-dialog'
 import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression } from '@/types/db'
 import {
   deleteScene,
@@ -43,6 +44,7 @@ export default function StoryboardPage() {
   const [dialogueToAdd, setDialogueToAdd] = useState('')
   const [draggedSceneId, setDraggedSceneId] = useState<string | null>(null)
   const [playingSceneId, setPlayingSceneId] = useState<string | null>(null)
+  const [exportingSceneId, setExportingSceneId] = useState<string | null>(null)
 
   useEffect(() => {
     loadAll()
@@ -376,6 +378,17 @@ export default function StoryboardPage() {
                             <Play size={16} className="text-primary" />
                           </button>
                           <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setExportingSceneId(scene.id)
+                            }}
+                            disabled={(scene.dialogues?.length ?? 0) === 0}
+                            className="p-2 hover:bg-primary/20 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="動画書き出し"
+                          >
+                            <Video size={16} className="text-primary" />
+                          </button>
+                          <button
                             onClick={() => handleEditScene(scene)}
                             className="p-2 hover:bg-primary/20 rounded-lg transition"
                           >
@@ -431,6 +444,15 @@ export default function StoryboardPage() {
         audioFiles={audioFiles}
         expressions={expressions}
         onClose={() => setPlayingSceneId(null)}
+      />
+
+      <SceneExportDialog
+        scene={exportingSceneId ? scenes.find((s) => s.id === exportingSceneId) ?? null : null}
+        characters={characters}
+        audioFiles={audioFiles}
+        expressions={expressions}
+        open={!!exportingSceneId}
+        onClose={() => setExportingSceneId(null)}
       />
     </div>
   )
