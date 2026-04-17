@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar'
 import { SceneExportDialog } from '@/components/scene-export-dialog'
-import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression } from '@/types/db'
+import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer } from '@/types/db'
 import {
   deleteScene,
   deleteSceneDialogue,
@@ -15,8 +15,10 @@ import {
   getAllCharacters,
   getAllDialogues,
   getAllExpressions,
+  getAllIllustrations,
   getAllSceneDialogues,
   getAllScenes,
+  getLayersByIllustration,
   saveScene,
   saveSceneDialogue,
   saveScenesBatch,
@@ -36,10 +38,11 @@ export default function StoryboardPage() {
   const [characters, setCharacters] = useState<Character[]>([])
   const [audioFiles, setAudioFiles] = useState<AudioFile[]>([])
   const [expressions, setExpressions] = useState<CharacterExpression[]>([])
+  const [illustrations, setIllustrations] = useState<IllustrationWithLayers[]>([])
   const [loading, setLoading] = useState(true)
   const [showSceneForm, setShowSceneForm] = useState(false)
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null)
-  const [sceneFormData, setSceneFormData] = useState({ title: '', description: '' })
+  const [sceneFormData, setSceneFormData] = useState({ title: '', description: '', background_illustration_id: '' })
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
   const [dialogueToAdd, setDialogueToAdd] = useState('')
   const [draggedSceneId, setDraggedSceneId] = useState<string | null>(null)
@@ -52,14 +55,21 @@ export default function StoryboardPage() {
 
   async function loadAll() {
     try {
-      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions] = await Promise.all([
+      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts] = await Promise.all([
         getAllScenes(),
         getAllSceneDialogues(),
         getAllDialogues(),
         getAllCharacters(),
         getAllAudioFiles(),
         getAllExpressions(),
+        getAllIllustrations(),
       ])
+      const withLayers: IllustrationWithLayers[] = await Promise.all(
+        illusts.map(async (i) => ({
+          ...i,
+          layers: await getLayersByIllustration(i.id),
+        })),
+      )
       const dialogueById = new Map(allDialogues.map((d) => [d.id, d]))
       const combined: SceneWithDialogues[] = rawScenes.map((scene) => ({
         ...scene,
@@ -73,11 +83,21 @@ export default function StoryboardPage() {
       setCharacters(allCharacters)
       setAudioFiles(allAudio)
       setExpressions(allExpressions)
+      setIllustrations(withLayers)
     } catch (e) {
       console.error('[anime-app] load storyboard failed', e)
     } finally {
       setLoading(false)
     }
+  }
+
+  function backgroundLayersForScene(scene: Scene): Layer[] {
+    if (!scene.background_illustration_id) return []
+    const illust = illustrations.find((i) => i.id === scene.background_illustration_id)
+    if (!illust) return []
+    return [...illust.layers]
+      .filter((l) => l.visible)
+      .sort((a, b) => a.order_index - b.order_index)
   }
 
   async function handleAddScene(e: React.FormEvent) {
@@ -94,6 +114,7 @@ export default function StoryboardPage() {
         id: existing.id,
         title: sceneFormData.title,
         description: sceneFormData.description || null,
+        background_illustration_id: sceneFormData.background_illustration_id || null,
         order_index: existing.order_index,
         created_at: existing.created_at,
         updated_at: now,
@@ -110,6 +131,7 @@ export default function StoryboardPage() {
         id: crypto.randomUUID(),
         title: sceneFormData.title,
         description: sceneFormData.description || null,
+        background_illustration_id: sceneFormData.background_illustration_id || null,
         order_index: maxOrder + 1,
         created_at: now,
         updated_at: now,
@@ -122,7 +144,7 @@ export default function StoryboardPage() {
       setScenes((prev) => [...prev, newScene])
     }
 
-    setSceneFormData({ title: '', description: '' })
+    setSceneFormData({ title: '', description: '', background_illustration_id: '' })
     setShowSceneForm(false)
   }
 
@@ -187,7 +209,11 @@ export default function StoryboardPage() {
   }
 
   function handleEditScene(scene: Scene) {
-    setSceneFormData({ title: scene.title || '', description: scene.description || '' })
+    setSceneFormData({
+      title: scene.title || '',
+      description: scene.description || '',
+      background_illustration_id: scene.background_illustration_id || '',
+    })
     setEditingSceneId(scene.id)
     setShowSceneForm(true)
   }
@@ -206,7 +232,7 @@ export default function StoryboardPage() {
             <Button
               onClick={() => {
                 setEditingSceneId(null)
-                setSceneFormData({ title: '', description: '' })
+                setSceneFormData({ title: '', description: '', background_illustration_id: '' })
                 setShowSceneForm(!showSceneForm)
               }}
               className="gap-2"
@@ -242,6 +268,26 @@ export default function StoryboardPage() {
                     rows={2}
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">背景</label>
+                  <select
+                    value={sceneFormData.background_illustration_id}
+                    onChange={(e) => setSceneFormData({ ...sceneFormData, background_illustration_id: e.target.value })}
+                    className="w-full px-3 py-2 bg-background border border-input rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="">なし(黒)</option>
+                    {illustrations.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.name} ({i.layers.length} 層)
+                      </option>
+                    ))}
+                  </select>
+                  {illustrations.length === 0 && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      環境タブで素材を作成すると選択できます
+                    </p>
+                  )}
+                </div>
                 <div className="flex gap-2">
                   <Button type="submit">
                     {editingSceneId ? '更新' : '作成'}
@@ -252,7 +298,7 @@ export default function StoryboardPage() {
                     onClick={() => {
                       setShowSceneForm(false)
                       setEditingSceneId(null)
-                      setSceneFormData({ title: '', description: '' })
+                      setSceneFormData({ title: '', description: '', background_illustration_id: '' })
                     }}
                   >
                     キャンセル
@@ -438,22 +484,31 @@ export default function StoryboardPage() {
         </div>
       </main>
 
-      <ScenePlayerDialog
-        scene={playingSceneId ? scenes.find((s) => s.id === playingSceneId) ?? null : null}
-        characters={characters}
-        audioFiles={audioFiles}
-        expressions={expressions}
-        onClose={() => setPlayingSceneId(null)}
-      />
-
-      <SceneExportDialog
-        scene={exportingSceneId ? scenes.find((s) => s.id === exportingSceneId) ?? null : null}
-        characters={characters}
-        audioFiles={audioFiles}
-        expressions={expressions}
-        open={!!exportingSceneId}
-        onClose={() => setExportingSceneId(null)}
-      />
+      {(() => {
+        const playScene = playingSceneId ? scenes.find((s) => s.id === playingSceneId) ?? null : null
+        const exportScene = exportingSceneId ? scenes.find((s) => s.id === exportingSceneId) ?? null : null
+        return (
+          <>
+            <ScenePlayerDialog
+              scene={playScene}
+              characters={characters}
+              audioFiles={audioFiles}
+              expressions={expressions}
+              backgroundLayers={playScene ? backgroundLayersForScene(playScene) : []}
+              onClose={() => setPlayingSceneId(null)}
+            />
+            <SceneExportDialog
+              scene={exportScene}
+              characters={characters}
+              audioFiles={audioFiles}
+              expressions={expressions}
+              backgroundLayers={exportScene ? backgroundLayersForScene(exportScene) : []}
+              open={!!exportingSceneId}
+              onClose={() => setExportingSceneId(null)}
+            />
+          </>
+        )
+      })()}
     </div>
   )
 }
@@ -473,12 +528,14 @@ function ScenePlayerDialog({
   characters,
   audioFiles,
   expressions,
+  backgroundLayers,
   onClose,
 }: {
   scene: SceneWithDialogues | null
   characters: Character[]
   audioFiles: AudioFile[]
   expressions: CharacterExpression[]
+  backgroundLayers: Layer[]
   onClose: () => void
 }) {
   const [index, setIndex] = useState(0)
@@ -560,6 +617,7 @@ function ScenePlayerDialog({
                 audioUrl={current?.audio?.file_url ?? null}
                 overrideExpressionId={current?.expressionId ?? null}
                 caption={current?.text ?? null}
+                backgroundLayers={backgroundLayers}
                 playing={playing}
                 onEnded={handleEnded}
               />

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Users } from 'lucide-react'
-import type { Character, CharacterExpression } from '@/types/db'
+import type { Character, CharacterExpression, Layer } from '@/types/db'
 
 interface LipSyncStageProps {
   character: Character | null
@@ -12,6 +12,8 @@ interface LipSyncStageProps {
   threshold?: number
   playing: boolean
   caption?: string | null
+  // 背景レイヤー(order_index 昇順、可視のみ)。キャラ画像の後ろに重ねる。
+  backgroundLayers?: Layer[]
   onEnded?: () => void
   className?: string
 }
@@ -26,6 +28,7 @@ export function LipSyncStage({
   threshold = 40,
   playing,
   caption,
+  backgroundLayers,
   onEnded,
   className,
 }: LipSyncStageProps) {
@@ -182,11 +185,26 @@ export function LipSyncStage({
         'flex items-center justify-center bg-background rounded-md border border-border aspect-square overflow-hidden relative'
       }
     >
+      {backgroundLayers?.map((layer) => (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={layer.id}
+          src={layer.image_url}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+          style={{ opacity: layer.opacity }}
+        />
+      ))}
       {img ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img key={img} src={img} alt={character?.name ?? ''} className="w-full h-full object-contain" />
+        <img
+          key={img}
+          src={img}
+          alt={character?.name ?? ''}
+          className="relative w-full h-full object-contain"
+        />
       ) : (
-        <div className="text-center text-muted-foreground p-4">
+        <div className="relative text-center text-muted-foreground p-4">
           <Users size={32} className="mx-auto mb-2" />
           <p className="text-xs">画像を登録してください</p>
         </div>

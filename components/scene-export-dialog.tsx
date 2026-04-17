@@ -14,6 +14,7 @@ import type {
   AudioFile,
   Character,
   CharacterExpression,
+  Layer,
   SceneWithDialogues,
 } from '@/types/db'
 
@@ -40,6 +41,7 @@ export function SceneExportDialog({
   characters,
   audioFiles,
   expressions,
+  backgroundLayers,
   open,
   onClose,
 }: {
@@ -47,6 +49,7 @@ export function SceneExportDialog({
   characters: Character[]
   audioFiles: AudioFile[]
   expressions: CharacterExpression[]
+  backgroundLayers: Layer[]
   open: boolean
   onClose: () => void
 }) {
@@ -115,6 +118,24 @@ export function SceneExportDialog({
   ) {
     ctx.fillStyle = '#111111'
     ctx.fillRect(0, 0, WIDTH, HEIGHT)
+
+    // 背景レイヤー(order_index 昇順で奥から前)
+    if (backgroundLayers.length > 0) {
+      for (const layer of backgroundLayers) {
+        const bg = cache.get(layer.image_url)
+        if (!bg) continue
+        const prevAlpha = ctx.globalAlpha
+        ctx.globalAlpha = layer.opacity
+        // object-cover: キャンバス全面を覆うようにスケール
+        const scale = Math.max(WIDTH / bg.width, HEIGHT / bg.height)
+        const w = bg.width * scale
+        const h = bg.height * scale
+        const x = (WIDTH - w) / 2
+        const y = (HEIGHT - h) / 2
+        ctx.drawImage(bg, x, y, w, h)
+        ctx.globalAlpha = prevAlpha
+      }
+    }
 
     let imgUrl: string | null = null
     // 瞬き中はすべてに優先して差し替え(パッと閉じてパッと開く)
@@ -200,6 +221,7 @@ export function SceneExportDialog({
       if (q.blink) urls.add(q.blink.image_url)
       if (q.override) urls.add(q.override.image_url)
     })
+    backgroundLayers.forEach((l) => urls.add(l.image_url))
 
     let audioCtx: AudioContext | null = null
     let recorder: MediaRecorder | null = null

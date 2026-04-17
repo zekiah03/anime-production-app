@@ -49,6 +49,7 @@ export interface Scene {
   id: string
   title: string | null
   description: string | null
+  background_illustration_id: string | null // 背景に使う環境素材
   order_index: number
   created_at: string
   updated_at: string
