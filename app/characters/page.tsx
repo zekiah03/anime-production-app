@@ -43,6 +43,7 @@ const KIND_LABEL: Record<ExpressionKind, string> = {
   mouth_closed: '口閉じ',
   mouth_open: '口開け',
   expression: '表情',
+  blink: '目パチ',
 }
 
 export default function CharactersPage() {
@@ -416,6 +417,7 @@ function CharacterDetailDialog({
                   >
                     <option value="mouth_open">口開け(リップシンク用)</option>
                     <option value="mouth_closed">口閉じ(リップシンク用)</option>
+                    <option value="blink">目パチ(瞬き用)</option>
                     <option value="expression">表情バリエーション</option>
                   </select>
                   <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-3 py-2 bg-background border border-input rounded-md text-sm hover:bg-accent/20 transition">

@@ -30,6 +30,7 @@ export function LipSyncStage({
   className,
 }: LipSyncStageProps) {
   const [mouthOpen, setMouthOpen] = useState(false)
+  const [blinking, setBlinking] = useState(false)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const ctxRef = useRef<AudioContext | null>(null)
@@ -43,12 +44,15 @@ export function LipSyncStage({
 
   const mouthClosed = expressions.find((e) => e.kind === 'mouth_closed')
   const mouthOpenExpr = expressions.find((e) => e.kind === 'mouth_open')
+  const blinkExpr = expressions.find((e) => e.kind === 'blink') ?? null
   const override = overrideExpressionId
     ? expressions.find((e) => e.id === overrideExpressionId) ?? null
     : null
 
   function displayImage(): string | null {
     if (!character) return null
+    // 瞬きは最優先(口形/表情を瞬時に上書きする瞬間切替)
+    if (blinking && blinkExpr) return blinkExpr.image_url
     if (playing && mouthOpenExpr && mouthClosed) {
       return mouthOpen ? mouthOpenExpr.image_url : mouthClosed.image_url
     }
@@ -131,6 +135,38 @@ export function LipSyncStage({
       audioRef.current?.pause()
     }
   }, [])
+
+  // 瞬き: 3〜5秒ごとに 120ms だけ blink 画像を出す。
+  // blink 画像が登録されていないキャラではなにもしない。
+  useEffect(() => {
+    if (!blinkExpr) return
+    let cancelled = false
+    let timer: number | null = null
+
+    const blinkOnce = () => {
+      if (cancelled) return
+      setBlinking(true)
+      timer = window.setTimeout(() => {
+        if (cancelled) return
+        setBlinking(false)
+        scheduleNext()
+      }, 80) // コマ切替風の短さ(ヌルヌルさせない)
+    }
+
+    const scheduleNext = () => {
+      if (cancelled) return
+      const delay = 3000 + Math.random() * 2000
+      timer = window.setTimeout(blinkOnce, delay)
+    }
+
+    scheduleNext()
+
+    return () => {
+      cancelled = true
+      if (timer !== null) window.clearTimeout(timer)
+      setBlinking(false)
+    }
+  }, [blinkExpr])
 
   function handleEnded() {
     stopTick()

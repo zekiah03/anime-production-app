@@ -11,7 +11,7 @@ export interface Character {
 }
 
 // キャラ表情(口パク用の口開閉・表情バリエーション)
-export type ExpressionKind = 'mouth_closed' | 'mouth_open' | 'expression'
+export type ExpressionKind = 'mouth_closed' | 'mouth_open' | 'expression' | 'blink'
 
 export interface CharacterExpression {
   id: string

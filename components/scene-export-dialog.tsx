@@ -23,6 +23,7 @@ interface ResolvedDialogue {
   audio: AudioFile
   mouthOpen: CharacterExpression | null
   mouthClosed: CharacterExpression | null
+  blink: CharacterExpression | null
   override: CharacterExpression | null
 }
 
@@ -72,6 +73,7 @@ export function SceneExportDialog({
             audio,
             mouthOpen: charExpressions.find((x) => x.kind === 'mouth_open') ?? null,
             mouthClosed: charExpressions.find((x) => x.kind === 'mouth_closed') ?? null,
+            blink: charExpressions.find((x) => x.kind === 'blink') ?? null,
             override: d.expression_id
               ? charExpressions.find((x) => x.id === d.expression_id) ?? null
               : null,
@@ -109,12 +111,16 @@ export function SceneExportDialog({
     current: ResolvedDialogue,
     cache: Map<string, HTMLImageElement>,
     mouthOpen: boolean,
+    blinking: boolean,
   ) {
     ctx.fillStyle = '#111111'
     ctx.fillRect(0, 0, WIDTH, HEIGHT)
 
     let imgUrl: string | null = null
-    if (current.override) {
+    // 瞬き中はすべてに優先して差し替え(パッと閉じてパッと開く)
+    if (blinking && current.blink) {
+      imgUrl = current.blink.image_url
+    } else if (current.override) {
       imgUrl = current.override.image_url
     } else if (current.mouthOpen && current.mouthClosed) {
       imgUrl = (mouthOpen ? current.mouthOpen : current.mouthClosed).image_url
@@ -191,6 +197,7 @@ export function SceneExportDialog({
       if (q.character.image_url) urls.add(q.character.image_url)
       if (q.mouthOpen) urls.add(q.mouthOpen.image_url)
       if (q.mouthClosed) urls.add(q.mouthClosed.image_url)
+      if (q.blink) urls.add(q.blink.image_url)
       if (q.override) urls.add(q.override.image_url)
     })
 
@@ -272,6 +279,11 @@ export function SceneExportDialog({
         let lastTick = performance.now()
         let raf: number | null = null
 
+        // 瞬きタイマー: 3〜5秒間隔で 80ms だけパッと閉じる
+        let blinking = false
+        let blinkEndAt = 0
+        let nextBlinkAt = performance.now() + 3000 + Math.random() * 2000
+
         await new Promise<void>((resolve, reject) => {
           audioEl.addEventListener('ended', () => resolve(), { once: true })
           audioEl.addEventListener('error', () => reject(new Error('再生エラー')), {
@@ -291,7 +303,15 @@ export function SceneExportDialog({
               mouthOpen = sum / freq.length > LIPSYNC_THRESHOLD
               lastTick = now
             }
-            drawFrame(ctx, current, imageCache, mouthOpen)
+            // 瞬き状態の更新
+            if (blinking && now >= blinkEndAt) {
+              blinking = false
+              nextBlinkAt = now + 3000 + Math.random() * 2000
+            } else if (!blinking && now >= nextBlinkAt) {
+              blinking = true
+              blinkEndAt = now + 80
+            }
+            drawFrame(ctx, current, imageCache, mouthOpen, blinking)
             raf = requestAnimationFrame(tick)
           }
           raf = requestAnimationFrame(tick)
