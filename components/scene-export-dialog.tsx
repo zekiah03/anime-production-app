@@ -72,13 +72,20 @@ interface ResolvedDialogue {
   silentDurationMs: number
 }
 
-// 書き出し解像度は縦型ショート動画を意識した 9:16。将来 UI で切替可能にしてもよい。
-const WIDTH = 720
-const HEIGHT = 1280
 const LIPSYNC_THRESHOLD = 40
 const TICK_MS = 100
 
-type Status = 'idle' | 'preparing' | 'recording' | 'complete' | 'error'
+type Aspect = '9:16' | '16:9' | '1:1'
+type Quality = '720p' | '1080p'
+type Format = 'webm' | 'mp4'
+type Status = 'idle' | 'preparing' | 'recording' | 'converting' | 'complete' | 'error'
+
+function resolutionFor(aspect: Aspect, quality: Quality): { width: number; height: number } {
+  const unit = quality === '1080p' ? 1080 : 720
+  if (aspect === '9:16') return { width: unit === 1080 ? 1080 : 720, height: unit === 1080 ? 1920 : 1280 }
+  if (aspect === '16:9') return { width: unit === 1080 ? 1920 : 1280, height: unit === 1080 ? 1080 : 720 }
+  return { width: unit, height: unit } // 1:1
+}
 
 export function SceneExportDialog({
   scene,
@@ -124,9 +131,16 @@ export function SceneExportDialog({
   const [progressIndex, setProgressIndex] = useState(0)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
+  const [format, setFormat] = useState<Format>('webm')
+  const [aspect, setAspect] = useState<Aspect>('9:16')
+  const [quality, setQuality] = useState<Quality>('720p')
+  const [convertProgress, setConvertProgress] = useState(0)
+  const [ffmpegLoadMsg, setFfmpegLoadMsg] = useState<string | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const cancelledRef = useRef(false)
+
+  const { width: WIDTH, height: HEIGHT } = resolutionFor(aspect, quality)
 
   const queue: ResolvedDialogue[] = scene
     ? scene.dialogues
@@ -200,6 +214,8 @@ export function SceneExportDialog({
     if (!open) {
       setStatus('idle')
       setProgressIndex(0)
+      setConvertProgress(0)
+      setFfmpegLoadMsg(null)
       setErrorMessage(null)
       setBlobUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev)
@@ -655,9 +671,41 @@ export function SceneExportDialog({
         return
       }
 
-      const blob = new Blob(chunks, { type: mimeType || 'video/webm' })
-      setBlobUrl(URL.createObjectURL(blob))
-      setStatus('complete')
+      const webmBlob = new Blob(chunks, { type: mimeType || 'video/webm' })
+
+      // mp4 が選ばれている場合は ffmpeg.wasm で変換する
+      if (format === 'mp4') {
+        setStatus('converting')
+        setConvertProgress(0)
+        try {
+          const { convertWebmToMp4, loadFfmpeg } = await import('@/lib/ffmpeg-lazy')
+          // ロード進捗(初回のみ)
+          await loadFfmpeg((kind, loaded, total) => {
+            const label = kind === 'core-js' ? 'コード' : 'WASM'
+            const pct = total > 0 ? Math.round((loaded / total) * 100) : 0
+            setFfmpegLoadMsg(`変換ツール(${label})を読み込み中… ${pct}%`)
+          })
+          setFfmpegLoadMsg(null)
+          const mp4Blob = await convertWebmToMp4(webmBlob, (r) => setConvertProgress(r))
+          if (cancelledRef.current) {
+            setStatus('idle')
+            return
+          }
+          setBlobUrl(URL.createObjectURL(mp4Blob))
+          setStatus('complete')
+        } catch (e) {
+          console.error('[anime-app] mp4 convert failed', e)
+          // 変換失敗時は WebM のまま出す(フォールバック)
+          setErrorMessage(
+            'mp4 変換に失敗したため WebM のまま出力しました: ' + (e as Error).message,
+          )
+          setBlobUrl(URL.createObjectURL(webmBlob))
+          setStatus('complete')
+        }
+      } else {
+        setBlobUrl(URL.createObjectURL(webmBlob))
+        setStatus('complete')
+      }
     } catch (e) {
       console.error('[anime-app] export failed', e)
       setErrorMessage((e as Error).message)
@@ -680,7 +728,10 @@ export function SceneExportDialog({
     if (!blobUrl) return
     const a = document.createElement('a')
     a.href = blobUrl
-    a.download = `${scene?.title ?? 'scene'}.webm`
+    // 変換に失敗した場合 blobUrl は WebM を指す(blob の type から拡張子を決めるのが厳密だが、
+    // 失敗時の errorMessage で明示しているので、選択された format を使って問題ない)
+    const ext = blobUrl && format === 'mp4' && !errorMessage ? 'mp4' : 'webm'
+    a.download = `${scene?.title ?? 'scene'}.${ext}`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -694,7 +745,7 @@ export function SceneExportDialog({
         <DialogHeader>
           <DialogTitle>{scene?.title ?? 'シーン'} を動画として書き出し</DialogTitle>
           <DialogDescription>
-            キャラと音声が設定されたセリフを順番に繋いで WebM 動画を生成します(
+            キャラと音声が設定されたセリフを順番に繋いで動画を生成します(
             {queue.length} / {scene?.dialogues.length ?? 0} 件対象
             {skipped > 0 ? `、${skipped} 件はスキップ` : ''})
           </DialogDescription>
@@ -706,10 +757,90 @@ export function SceneExportDialog({
           </p>
         ) : (
           <div className="space-y-4">
+            {/* 出力オプション(idle 時だけ編集可) */}
+            <div className="space-y-3 p-3 bg-background border border-border rounded-md">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">出力形式</label>
+                  <div className="flex gap-1">
+                    {(['webm', 'mp4'] as Format[]).map((f) => (
+                      <button
+                        key={f}
+                        type="button"
+                        disabled={status !== 'idle'}
+                        onClick={() => setFormat(f)}
+                        className={`flex-1 px-2 py-1.5 text-xs rounded border transition disabled:opacity-50 ${
+                          format === f
+                            ? 'bg-primary/20 border-primary/40 text-primary'
+                            : 'bg-card border-input text-foreground hover:bg-primary/10'
+                        }`}
+                      >
+                        {f === 'webm' ? 'WebM (速い)' : 'mp4 (投稿用)'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">アスペクト</label>
+                  <div className="flex gap-1">
+                    {(
+                      [
+                        ['9:16', '縦9:16'],
+                        ['16:9', '横16:9'],
+                        ['1:1', '正方1:1'],
+                      ] as [Aspect, string][]
+                    ).map(([a, label]) => (
+                      <button
+                        key={a}
+                        type="button"
+                        disabled={status !== 'idle'}
+                        onClick={() => setAspect(a)}
+                        className={`flex-1 px-2 py-1.5 text-xs rounded border transition disabled:opacity-50 ${
+                          aspect === a
+                            ? 'bg-primary/20 border-primary/40 text-primary'
+                            : 'bg-card border-input text-foreground hover:bg-primary/10'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">解像度</label>
+                  <div className="flex gap-1">
+                    {(['720p', '1080p'] as Quality[]).map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        disabled={status !== 'idle'}
+                        onClick={() => setQuality(q)}
+                        className={`flex-1 px-2 py-1.5 text-xs rounded border transition disabled:opacity-50 ${
+                          quality === q
+                            ? 'bg-primary/20 border-primary/40 text-primary'
+                            : 'bg-card border-input text-foreground hover:bg-primary/10'
+                        }`}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                出力サイズ: {WIDTH}×{HEIGHT}・形式: {format === 'mp4' ? 'mp4 (H.264/AAC)' : 'WebM'}
+                {format === 'mp4' ? ' / 初回のみ変換ツールを ~30MB 読み込みます' : ''}
+              </p>
+            </div>
+
             <canvas
               ref={canvasRef}
               className="mx-auto border border-border rounded bg-black"
-              style={{ width: 240, aspectRatio: '9 / 16' }}
+              style={{
+                width: 240,
+                aspectRatio:
+                  aspect === '9:16' ? '9 / 16' : aspect === '16:9' ? '16 / 9' : '1 / 1',
+              }}
             />
 
             {status === 'idle' && (
@@ -731,15 +862,35 @@ export function SceneExportDialog({
               </div>
             )}
 
+            {status === 'converting' && (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground text-center">
+                  {ffmpegLoadMsg ?? `mp4 に変換中… ${Math.round(convertProgress * 100)}%`}
+                </p>
+                <div className="w-full h-2 bg-muted rounded overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{ width: `${Math.round(convertProgress * 100)}%` }}
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground text-center">
+                  初回変換は重めです(動画長 × 数十秒)。ブラウザを閉じないでください
+                </p>
+              </div>
+            )}
+
             {status === 'complete' && blobUrl && (
               <div className="space-y-3">
                 <video src={blobUrl} controls className="w-full rounded" />
                 <Button onClick={downloadVideo} className="gap-2 w-full">
-                  <Download size={16} /> ダウンロード (.webm)
+                  <Download size={16} /> ダウンロード (.
+                  {blobUrl && format === 'mp4' && !errorMessage ? 'mp4' : 'webm'})
                 </Button>
-                <p className="text-xs text-muted-foreground text-center">
-                  mp4 にしたい場合は VLC や Handbrake などで変換してください
-                </p>
+                {errorMessage && (
+                  <p className="text-xs text-destructive text-center">
+                    ※ {errorMessage}
+                  </p>
+                )}
               </div>
             )}
 
