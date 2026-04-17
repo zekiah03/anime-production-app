@@ -135,6 +135,37 @@ export default function StoryboardPage() {
   // 全データリセット確認
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [resetInput, setResetInput] = useState('')
+  // セリフクリップボード(コピー元シーン id + 生スナップショット)
+  const [dialogueClipboard, setDialogueClipboard] = useState<
+    | {
+        sourceSceneTitle: string
+        items: {
+          // Dialogue snapshot
+          text: string
+          character_id: string | null
+          audio_id: string | null
+          expression_id: string | null
+          notes: string | null
+          duration_ms: number | null
+          // SD meta
+          se_id: string | null
+          se_volume: number
+          character_x: number
+          character_scale: number
+          character_flipped: boolean
+          pause_after_ms: number
+          telop_intro?: TelopIntro | null
+          telop_shake?: TelopShake | null
+        }[]
+      }
+    | null
+  >(null)
+  // セリフフィルタ(キー = sceneId)
+  const [dialogueFilter, setDialogueFilter] = useState<
+    'all' | 'chars' | 'narration' | 'withSe'
+  >('all')
+  // ダークモード(localStorage に保存、初期化時は prefers-color-scheme)
+  const [darkMode, setDarkMode] = useState<boolean | null>(null)
   // ナレーション追加フォーム(展開中のシーンに対して使う)
   const [narrationText, setNarrationText] = useState('')
   const [narrationAudioId, setNarrationAudioId] = useState('')
@@ -143,6 +174,26 @@ export default function StoryboardPage() {
   useEffect(() => {
     loadAll()
   }, [])
+
+  // ダークモード初期化: localStorage 優先、なければ prefers-color-scheme
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const stored = localStorage.getItem('anime-app-dark')
+    if (stored === 'true') setDarkMode(true)
+    else if (stored === 'false') setDarkMode(false)
+    else setDarkMode(window.matchMedia('(prefers-color-scheme: dark)').matches)
+  }, [])
+
+  // ダークモード反映 + 保存
+  useEffect(() => {
+    if (darkMode === null || typeof document === 'undefined') return
+    const root = document.documentElement
+    if (darkMode) root.classList.add('dark')
+    else root.classList.remove('dark')
+    try {
+      localStorage.setItem('anime-app-dark', String(darkMode))
+    } catch {}
+  }, [darkMode])
 
   // 展開中のシーンへスクロール(allExpanded 中は無効: 全展開時にジャンプされると逆に迷子になる)
   useEffect(() => {
@@ -1600,6 +1651,84 @@ export default function StoryboardPage() {
     })
   }
 
+  // シーン内の全セリフをクリップボードにコピー(Dialogue は複製するので元データは不変)
+  function handleCopySceneDialoguesToClipboard(sceneId: string) {
+    const scene = scenes.find((s) => s.id === sceneId)
+    if (!scene || scene.dialogues.length === 0) {
+      alert('コピーするセリフがありません')
+      return
+    }
+    const sorted = [...scene.dialogues].sort((a, b) => a.order_index - b.order_index)
+    const items = sorted.map((sd) => ({
+      text: sd.dialogue?.text ?? '',
+      character_id: sd.dialogue?.character_id ?? null,
+      audio_id: sd.dialogue?.audio_id ?? null,
+      expression_id: sd.dialogue?.expression_id ?? null,
+      notes: sd.dialogue?.notes ?? null,
+      duration_ms: sd.dialogue?.duration_ms ?? null,
+      se_id: sd.se_id ?? null,
+      se_volume: typeof sd.se_volume === 'number' ? sd.se_volume : 1,
+      character_x: typeof sd.character_x === 'number' ? sd.character_x : 0.5,
+      character_scale: typeof sd.character_scale === 'number' ? sd.character_scale : 1.0,
+      character_flipped: !!sd.character_flipped,
+      pause_after_ms: typeof sd.pause_after_ms === 'number' ? sd.pause_after_ms : 0,
+      telop_intro: sd.telop_intro ?? null,
+      telop_shake: sd.telop_shake ?? null,
+    }))
+    setDialogueClipboard({ sourceSceneTitle: scene.title ?? '(無題)', items })
+  }
+
+  // クリップボードのセリフを対象シーンの末尾に貼付(Dialogue も新しい id で複製)
+  async function handlePasteDialoguesToScene(sceneId: string) {
+    if (!dialogueClipboard) return
+    const scene = scenes.find((s) => s.id === sceneId)
+    if (!scene) return
+    const now = new Date().toISOString()
+    let order = scene.dialogues.reduce((m, sd) => Math.max(m, sd.order_index), -1)
+    const newDialogues: Dialogue[] = []
+    const newSds: (SceneDialogue & { dialogue: Dialogue })[] = []
+    for (const item of dialogueClipboard.items) {
+      const dialogue: Dialogue = {
+        id: crypto.randomUUID(),
+        text: item.text,
+        character_id: item.character_id,
+        audio_id: item.audio_id,
+        expression_id: item.expression_id,
+        notes: item.notes,
+        emotion: null,
+        duration_ms: item.duration_ms,
+        created_at: now,
+        updated_at: now,
+      }
+      await saveDialogue(dialogue)
+      newDialogues.push(dialogue)
+      order += 1
+      const sd: SceneDialogue = {
+        id: crypto.randomUUID(),
+        scene_id: sceneId,
+        dialogue_id: dialogue.id,
+        order_index: order,
+        se_id: item.se_id,
+        se_volume: item.se_volume,
+        character_x: item.character_x,
+        character_scale: item.character_scale,
+        character_flipped: item.character_flipped,
+        pause_after_ms: item.pause_after_ms,
+        telop_intro: item.telop_intro ?? null,
+        telop_shake: item.telop_shake ?? null,
+        created_at: now,
+      }
+      await saveSceneDialogue(sd)
+      newSds.push({ ...sd, dialogue })
+    }
+    setDialogues((prev) => [...newDialogues, ...prev])
+    setScenes((prev) =>
+      prev.map((s) =>
+        s.id === sceneId ? { ...s, dialogues: [...s.dialogues, ...newSds] } : s,
+      ),
+    )
+  }
+
   // 全データリセット: 全ストアを空にしてメモリ state もクリア
   async function handleFullReset() {
     if (resetInput !== 'reset') return
@@ -1924,6 +2053,14 @@ export default function StoryboardPage() {
                 disabled={characters.length === 0}
               >
                 セリフ一覧
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setDarkMode((v) => !v)}
+                className="gap-2"
+                title={darkMode ? 'ライトモードに切替' : 'ダークモードに切替'}
+              >
+                {darkMode ? '☀️' : '🌙'}
               </Button>
               <Button
                 variant="outline"
@@ -2943,10 +3080,66 @@ export default function StoryboardPage() {
                               </div>
 
                               {/* ===== セリフ ===== */}
-                              <h5 className="font-medium text-foreground">シーン内のセリフ</h5>
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <h5 className="font-medium text-foreground">シーン内のセリフ</h5>
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  {/* フィルタ */}
+                                  <div className="flex gap-1 mr-2">
+                                    {[
+                                      { v: 'all' as const, label: '全部' },
+                                      { v: 'chars' as const, label: 'キャラのみ' },
+                                      { v: 'narration' as const, label: 'ナレのみ' },
+                                      { v: 'withSe' as const, label: 'SE付き' },
+                                    ].map((f) => (
+                                      <button
+                                        key={f.v}
+                                        type="button"
+                                        onClick={() => setDialogueFilter(f.v)}
+                                        className={`px-2 py-0.5 text-[10px] rounded border transition ${
+                                          dialogueFilter === f.v
+                                            ? 'bg-primary/20 border-primary/40 text-primary font-medium'
+                                            : 'bg-card border-input text-muted-foreground hover:bg-primary/10'
+                                        }`}
+                                      >
+                                        {f.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopySceneDialoguesToClipboard(scene.id)}
+                                    disabled={scene.dialogues.length === 0}
+                                    className="px-2 py-1 text-xs rounded border border-input text-foreground hover:bg-primary/10 disabled:opacity-50"
+                                    title="このシーンの全セリフをクリップボードにコピー"
+                                  >
+                                    コピー
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePasteDialoguesToScene(scene.id)}
+                                    disabled={!dialogueClipboard}
+                                    className="px-2 py-1 text-xs rounded border border-input text-foreground hover:bg-primary/10 disabled:opacity-50"
+                                    title={
+                                      dialogueClipboard
+                                        ? `「${dialogueClipboard.sourceSceneTitle}」の ${dialogueClipboard.items.length} セリフを貼付`
+                                        : 'コピーされたセリフがありません'
+                                    }
+                                  >
+                                    貼付{dialogueClipboard ? `(${dialogueClipboard.items.length})` : ''}
+                                  </button>
+                                </div>
+                              </div>
                               {scene.dialogues && scene.dialogues.length > 0 ? (
                                 <div className="space-y-2">
-                                  {scene.dialogues.map((sd) => {
+                                  {scene.dialogues
+                                    .filter((sd) => {
+                                      if (dialogueFilter === 'all') return true
+                                      if (dialogueFilter === 'chars') return !!sd.dialogue?.character_id
+                                      if (dialogueFilter === 'narration') return !sd.dialogue?.character_id
+                                      if (dialogueFilter === 'withSe') return !!sd.se_id
+                                      return true
+                                    })
+                                    .map((sd) => {
                                     const isNarration = !sd.dialogue?.character_id
                                     const seVol = typeof sd.se_volume === 'number' ? sd.se_volume : 1
                                     const cx = typeof sd.character_x === 'number' ? sd.character_x : 0.5
