@@ -760,6 +760,88 @@ export default function StoryboardPage() {
     setCheckedSceneIds(new Set())
   }
 
+  // 選択中の複数シーンを1つに統合。先頭(order_index 最小)を残し、残りのセリフを末尾に追加、
+  // キャストをマージ。後続シーンは削除。
+  async function handleBulkMerge() {
+    const ids = Array.from(checkedSceneIds)
+    if (ids.length < 2) {
+      alert('2シーン以上を選択してください')
+      return
+    }
+    const targets = scenes
+      .filter((s) => ids.includes(s.id))
+      .sort((a, b) => a.order_index - b.order_index)
+    if (targets.length < 2) return
+    if (
+      !window.confirm(
+        `選択中の ${targets.length} シーンを1つに統合しますか?\n先頭「${targets[0].title ?? ''}」に残りのセリフ・キャストが結合され、他のシーンは削除されます。`,
+      )
+    )
+      return
+    const base = targets[0]
+    const others = targets.slice(1)
+    const now = new Date().toISOString()
+
+    let order = base.dialogues.reduce((m, sd) => Math.max(m, sd.order_index), -1)
+    const newDialoguesForBase: typeof base.dialogues = []
+    for (const other of others) {
+      const sortedSds = [...other.dialogues].sort((a, b) => a.order_index - b.order_index)
+      for (const sd of sortedSds) {
+        order += 1
+        const moved = {
+          ...sd,
+          scene_id: base.id,
+          order_index: order,
+        }
+        const { dialogue: _d, ...row } = moved
+        void _d
+        await saveSceneDialogue(row)
+        newDialoguesForBase.push(moved)
+      }
+    }
+
+    // キャスト統合(character_id ダブり防止)
+    const baseCast = cast.filter((c) => c.scene_id === base.id)
+    const existingCharIds = new Set(baseCast.map((c) => c.character_id))
+    const addedCast: SceneCastMember[] = []
+    for (const other of others) {
+      const otherCast = cast.filter((c) => c.scene_id === other.id)
+      for (const c of otherCast) {
+        if (existingCharIds.has(c.character_id)) continue
+        existingCharIds.add(c.character_id)
+        const moved: SceneCastMember = {
+          ...c,
+          id: crypto.randomUUID(),
+          scene_id: base.id,
+          created_at: now,
+        }
+        await saveSceneCastMember(moved)
+        addedCast.push(moved)
+      }
+    }
+
+    // 後続シーン削除(カスケードで scene_dialogues も消えるが、既に base に付け替え済みなので影響なし)
+    for (const other of others) {
+      await deleteScene(other.id)
+    }
+
+    setScenes((prev) =>
+      prev
+        .filter((s) => !others.some((o) => o.id === s.id))
+        .map((s) =>
+          s.id === base.id
+            ? { ...s, dialogues: [...s.dialogues, ...newDialoguesForBase], updated_at: now }
+            : s,
+        ),
+    )
+    setCast((prev) => [
+      ...prev.filter((c) => !others.some((o) => o.id === c.scene_id)),
+      ...addedCast,
+    ])
+    clearChecked()
+    setSelectedSceneId(base.id)
+  }
+
   async function handleBulkDelete() {
     const ids = Array.from(checkedSceneIds)
     if (ids.length === 0) return
@@ -1819,6 +1901,16 @@ export default function StoryboardPage() {
                     <Button
                       size="sm"
                       variant="outline"
+                      onClick={handleBulkMerge}
+                      disabled={checkedSceneIds.size < 2}
+                      className="gap-1 h-8 px-2 text-xs"
+                      title="選択中シーンを1つに結合(先頭のシーンに残りのセリフ・キャストが追加される)"
+                    >
+                      統合
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
                       onClick={handleBulkDelete}
                       className="gap-1 h-8 px-2 text-xs text-destructive border-destructive/40 hover:bg-destructive/20"
                     >
@@ -2870,6 +2962,87 @@ export default function StoryboardPage() {
                   </Card>
                 )
               })()}
+
+              {/* プロジェクト全体統計(全動画合算 + 動画別ブレイクダウン) */}
+              {videos.length > 0 && (() => {
+                const rows = videos.map((v) => {
+                  const vs = scenes.filter((s) => (s.video_id ?? null) === v.id)
+                  const totalSec = vs.reduce(
+                    (sum, s) =>
+                      sum + buildTimelineClips(s).reduce((a, c) => a + c.durationSec, 0),
+                    0,
+                  )
+                  const totalDlg = vs.reduce((sum, s) => sum + s.dialogues.length, 0)
+                  return { id: v.id, name: v.name, scenes: vs.length, dialogues: totalDlg, seconds: totalSec }
+                })
+                const nullRowScenes = scenes.filter((s) => (s.video_id ?? null) === null)
+                if (nullRowScenes.length > 0) {
+                  rows.push({
+                    id: '__null__',
+                    name: '未分類',
+                    scenes: nullRowScenes.length,
+                    dialogues: nullRowScenes.reduce((sum, s) => sum + s.dialogues.length, 0),
+                    seconds: nullRowScenes.reduce(
+                      (sum, s) =>
+                        sum + buildTimelineClips(s).reduce((a, c) => a + c.durationSec, 0),
+                      0,
+                    ),
+                  })
+                }
+                const gTotal = rows.reduce(
+                  (acc, r) => ({
+                    scenes: acc.scenes + r.scenes,
+                    dialogues: acc.dialogues + r.dialogues,
+                    seconds: acc.seconds + r.seconds,
+                  }),
+                  { scenes: 0, dialogues: 0, seconds: 0 },
+                )
+                const fmtMs = (s: number) => {
+                  const m = Math.floor(s / 60)
+                  const sec = Math.round(s % 60)
+                  return m > 0 ? `${m}分${sec}秒` : `${sec}秒`
+                }
+                return (
+                  <Card className="bg-card border-border p-4 mt-4">
+                    <h3 className="text-sm font-semibold text-foreground mb-2">
+                      プロジェクト全体
+                    </h3>
+                    <div className="grid grid-cols-3 gap-2 mb-3">
+                      <div className="p-2 bg-background rounded">
+                        <p className="text-[10px] text-muted-foreground">動画</p>
+                        <p className="text-base font-bold text-primary tabular-nums">
+                          {videos.length}
+                        </p>
+                      </div>
+                      <div className="p-2 bg-background rounded">
+                        <p className="text-[10px] text-muted-foreground">シーン合計</p>
+                        <p className="text-base font-bold text-accent tabular-nums">
+                          {gTotal.scenes}
+                        </p>
+                      </div>
+                      <div className="p-2 bg-background rounded">
+                        <p className="text-[10px] text-muted-foreground">総尺合計</p>
+                        <p className="text-base font-bold text-primary tabular-nums">
+                          {fmtMs(gTotal.seconds)}
+                        </p>
+                      </div>
+                    </div>
+                    <ul className="space-y-1">
+                      {rows.map((r) => (
+                        <li
+                          key={r.id}
+                          className="flex items-center justify-between gap-2 text-xs px-2 py-1 bg-background rounded"
+                        >
+                          <span className="truncate flex-1 text-foreground">{r.name}</span>
+                          <span className="text-muted-foreground tabular-nums flex-shrink-0">
+                            {r.scenes}S / {r.dialogues}セリフ / {fmtMs(r.seconds)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </Card>
+                )
+              })()}
             </div>
           </div>
         </div>
@@ -3185,6 +3358,7 @@ function ScenePlayerDialog({
 }) {
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
+  const [playbackRate, setPlaybackRate] = useState(1)
   const bgmRef = useRef<HTMLAudioElement | null>(null)
   const seRef = useRef<HTMLAudioElement | null>(null)
   const pauseTimerRef = useRef<number | null>(null)
@@ -3201,13 +3375,14 @@ function ScenePlayerDialog({
     const el = bgmRef.current
     if (!el) return
     el.volume = bgmVolume
+    el.playbackRate = playbackRate
     if (playing && bgmTrack) {
       el.currentTime = 0
       el.play().catch((e) => console.warn('[anime-app] bgm play blocked', e))
     } else {
       el.pause()
     }
-  }, [playing, bgmTrack?.id, bgmVolume])
+  }, [playing, bgmTrack?.id, bgmVolume, playbackRate])
 
   // SE: 現在のセリフが切り替わるたびに冒頭で oneshot 再生
   useEffect(() => {
@@ -3218,6 +3393,7 @@ function ScenePlayerDialog({
     if (!el) return
     el.src = current.se.file_url
     el.volume = current.seVolume
+    el.playbackRate = playbackRate
     el.currentTime = 0
     el.play().catch((e) => console.warn('[anime-app] se play blocked', e))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3304,7 +3480,7 @@ function ScenePlayerDialog({
   const hasNext = index + 1 < queue.length
 
   function handleEnded() {
-    const gap = current?.pauseAfterMs ?? 0
+    const gap = Math.round((current?.pauseAfterMs ?? 0) / playbackRate)
     if (singleMode || !hasNext) {
       // 最後 or 1セリフモードは停止
       if (gap > 0 && !singleMode) {
@@ -3404,6 +3580,7 @@ function ScenePlayerDialog({
                 characterFlipped={current?.characterFlipped ?? false}
                 extraCharacters={current?.extras ?? []}
                 silentDurationMs={current?.silentDurationMs ?? 3000}
+                playbackRate={playbackRate}
                 playing={playing}
                 onEnded={handleEnded}
               />
@@ -3440,6 +3617,23 @@ function ScenePlayerDialog({
               <Button size="sm" variant="outline" onClick={handleSkip} disabled={!playing} className="gap-1">
                 <SkipForward size={14} /> 次へ
               </Button>
+              <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+                <span>速度</span>
+                {[0.5, 1, 1.5, 2].map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setPlaybackRate(r)}
+                    className={`px-2 py-1 rounded border tabular-nums transition ${
+                      playbackRate === r
+                        ? 'bg-primary/20 border-primary/40 text-primary font-medium'
+                        : 'bg-background border-input hover:bg-primary/10'
+                    }`}
+                  >
+                    {r}x
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* セリフ一覧(プレビュー) */}

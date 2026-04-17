@@ -37,6 +37,8 @@ interface LipSyncStageProps {
   // 音声なしのナレーションで使う表示時間 ms。audioUrl が null かつ playing の間に、
   // この時間が経過したら onEnded を呼ぶ。
   silentDurationMs?: number
+  // 再生速度(1=等倍)。音声と無音タイマーの両方に反映。
+  playbackRate?: number
   onEnded?: () => void
   className?: string
 }
@@ -68,9 +70,11 @@ export function LipSyncStage({
   characterFlipped,
   extraCharacters,
   silentDurationMs,
+  playbackRate,
   onEnded,
   className,
 }: LipSyncStageProps) {
+  const rate = typeof playbackRate === 'number' && playbackRate > 0 ? playbackRate : 1
   const effectiveStyle = telopStyle ?? DEFAULT_TELOP_STYLE
   const cx = typeof characterX === 'number' ? characterX : 0.5
   const cs = typeof characterScale === 'number' ? characterScale : 1.0
@@ -200,8 +204,8 @@ export function LipSyncStage({
       return
     }
     if (!audioUrl) {
-      // ナレーション(無音): 指定時間だけ待って onEnded
-      const ms = typeof silentDurationMs === 'number' ? silentDurationMs : 3000
+      // ナレーション(無音): 指定時間だけ待って onEnded。再生速度で短縮/延長。
+      const ms = (typeof silentDurationMs === 'number' ? silentDurationMs : 3000) / rate
       const timer = window.setTimeout(() => onEnded?.(), ms)
       return () => window.clearTimeout(timer)
     }
@@ -210,6 +214,7 @@ export function LipSyncStage({
       await ensureGraph()
       if (cancelled || !audioRef.current) return
       audioRef.current.currentTime = 0
+      audioRef.current.playbackRate = rate
       try {
         await audioRef.current.play()
         lastTickRef.current = performance.now()
@@ -222,7 +227,7 @@ export function LipSyncStage({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, audioUrl, silentDurationMs])
+  }, [playing, audioUrl, silentDurationMs, rate])
 
   useEffect(() => {
     return () => {
