@@ -105,6 +105,24 @@ export default function StoryboardPage() {
   // スクリプト一括貼り付け(テキスト → 複数セリフ)
   const [bulkScriptSceneId, setBulkScriptSceneId] = useState<string | null>(null)
   const [bulkScriptText, setBulkScriptText] = useState('')
+  // 削除 Undo トースト: 削除直後に復元できるよう、削除されたシーン群のスナップショットを保持
+  const [undoToast, setUndoToast] = useState<{
+    message: string
+    expiresAt: number
+    snapshots: {
+      scene: Scene
+      sceneDialogues: SceneDialogue[]
+      castMembers: SceneCastMember[]
+    }[]
+  } | null>(null)
+  // キャラ一括置換ダイアログ
+  const [showCharReplace, setShowCharReplace] = useState(false)
+  const [charReplaceFrom, setCharReplaceFrom] = useState('')
+  const [charReplaceTo, setCharReplaceTo] = useState('')
+  const [charReplaceResetAudio, setCharReplaceResetAudio] = useState(true)
+  // 動画連続再生
+  const [playingVideoId, setPlayingVideoId] = useState<string | null>(null)
+  const [playingVideoSceneIdx, setPlayingVideoSceneIdx] = useState(0)
   // ナレーション追加フォーム(展開中のシーンに対して使う)
   const [narrationText, setNarrationText] = useState('')
   const [narrationAudioId, setNarrationAudioId] = useState('')
@@ -918,11 +936,17 @@ export default function StoryboardPage() {
     const ids = Array.from(checkedSceneIds)
     if (ids.length === 0) return
     if (!window.confirm(`選択中の ${ids.length} シーンを削除しますか?`)) return
+    const snapshots = snapshotScenes(ids)
     for (const id of ids) await deleteScene(id)
     setScenes((prev) => prev.filter((s) => !checkedSceneIds.has(s.id)))
     setCast((prev) => prev.filter((c) => !checkedSceneIds.has(c.scene_id)))
     if (selectedSceneId && checkedSceneIds.has(selectedSceneId)) setSelectedSceneId(null)
     clearChecked()
+    setUndoToast({
+      message: `${snapshots.length} シーンを削除`,
+      expiresAt: Date.now() + 8000,
+      snapshots,
+    })
   }
 
   async function handleBulkMove(targetVideoId: string) {
@@ -1309,11 +1333,76 @@ export default function StoryboardPage() {
     setShowSceneForm(false)
   }
 
+  // シーン削除前にスナップショット(復元用)を作る
+  function snapshotScenes(
+    ids: string[],
+  ): { scene: Scene; sceneDialogues: SceneDialogue[]; castMembers: SceneCastMember[] }[] {
+    return ids
+      .map((id) => {
+        const s = scenes.find((x) => x.id === id)
+        if (!s) return null
+        const { dialogues: _d, ...sceneRow } = s
+        void _d
+        const sceneDialogues: SceneDialogue[] = s.dialogues.map((sd) => {
+          const { dialogue: _dd, ...row } = sd
+          void _dd
+          return row
+        })
+        const castMembers = cast.filter((c) => c.scene_id === id)
+        return { scene: sceneRow as Scene, sceneDialogues, castMembers }
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+  }
+
+  async function handleUndoDeletion() {
+    if (!undoToast) return
+    const snaps = undoToast.snapshots
+    for (const snap of snaps) {
+      await saveScene(snap.scene)
+      for (const sd of snap.sceneDialogues) {
+        await saveSceneDialogue(sd)
+      }
+      for (const c of snap.castMembers) {
+        await saveSceneCastMember(c)
+      }
+    }
+    // メモリに戻す(dialogue は dialogues state から参照 or null)
+    const restoredScenes: SceneWithDialogues[] = snaps.map((snap) => ({
+      ...snap.scene,
+      dialogues: snap.sceneDialogues.map((sd) => ({
+        ...sd,
+        dialogue: dialogues.find((d) => d.id === sd.dialogue_id) ?? null,
+      })),
+    }))
+    setScenes((prev) => [...prev, ...restoredScenes])
+    setCast((prev) => [...prev, ...snaps.flatMap((s) => s.castMembers)])
+    setUndoToast(null)
+  }
+
+  // undoToast 表示期限切れで自動クリア
+  useEffect(() => {
+    if (!undoToast) return
+    const remain = undoToast.expiresAt - Date.now()
+    if (remain <= 0) {
+      setUndoToast(null)
+      return
+    }
+    const t = window.setTimeout(() => setUndoToast(null), remain)
+    return () => window.clearTimeout(t)
+  }, [undoToast])
+
   async function handleDeleteScene(id: string) {
     if (!confirm('このシーンを削除してよろしいですか？')) return
+    const snapshots = snapshotScenes([id])
     await deleteScene(id)
     setScenes((prev) => prev.filter((s) => s.id !== id))
+    setCast((prev) => prev.filter((c) => c.scene_id !== id))
     if (selectedSceneId === id) setSelectedSceneId(null)
+    setUndoToast({
+      message: `シーン「${snapshots[0]?.scene.title ?? ''}」を削除`,
+      expiresAt: Date.now() + 8000,
+      snapshots,
+    })
   }
 
   async function handleAddDialogueToScene(dialogueId: string) {
@@ -1462,6 +1551,65 @@ export default function StoryboardPage() {
     })
   }
 
+  // キャラ一括置換: Dialogue.character_id が src のものを全て tgt に書き換える。
+  // tgt が空の場合はナレーション化(character_id=null)。
+  // resetAudio=true なら audio_id と expression_id も null に戻す(別キャラの声のまま残ると不整合)。
+  async function handleApplyCharReplace() {
+    const src = charReplaceFrom
+    const tgt = charReplaceTo // '' = ナレーション化
+    if (!src) {
+      alert('置換元キャラを選んでください')
+      return
+    }
+    if (src === tgt) {
+      alert('置換元と置換先が同じです')
+      return
+    }
+    const targetDialogues = dialogues.filter((d) => d.character_id === src)
+    if (targetDialogues.length === 0) {
+      alert('このキャラのセリフはありません')
+      return
+    }
+    const tgtName = tgt
+      ? characters.find((c) => c.id === tgt)?.name ?? '不明'
+      : 'ナレーション'
+    if (
+      !window.confirm(
+        `${targetDialogues.length} 件のセリフを「${tgtName}」に置換します。${charReplaceResetAudio ? '音声と表情はリセットされます。' : ''}よろしいですか?`,
+      )
+    )
+      return
+    const now = new Date().toISOString()
+    const updated = new Map<string, Dialogue>()
+    for (const d of targetDialogues) {
+      const u: Dialogue = {
+        ...d,
+        character_id: tgt || null,
+        audio_id: charReplaceResetAudio ? null : d.audio_id,
+        expression_id: charReplaceResetAudio ? null : d.expression_id,
+        notes: !tgt ? 'narration' : d.notes === 'narration' ? null : d.notes,
+        updated_at: now,
+      }
+      await saveDialogue(u)
+      updated.set(u.id, u)
+    }
+    setDialogues((prev) => prev.map((d) => updated.get(d.id) ?? d))
+    setScenes((prev) =>
+      prev.map((s) => ({
+        ...s,
+        dialogues: s.dialogues.map((sd) =>
+          sd.dialogue && updated.has(sd.dialogue.id)
+            ? { ...sd, dialogue: updated.get(sd.dialogue.id)! }
+            : sd,
+        ),
+      })),
+    )
+    setShowCharReplace(false)
+    setCharReplaceFrom('')
+    setCharReplaceTo('')
+    alert(`${updated.size} 件のセリフを置換しました`)
+  }
+
   // シーンを同動画内で1つ上/下に移動(ドラッグ不要)
   async function handleMoveSceneByStep(sceneId: string, step: -1 | 1) {
     const src = scenes.find((s) => s.id === sceneId)
@@ -1532,6 +1680,23 @@ export default function StoryboardPage() {
             <div className="flex gap-2 flex-wrap">
               <Button
                 variant="outline"
+                onClick={() => {
+                  if (!selectedVideoId) return
+                  setPlayingVideoSceneIdx(0)
+                  setPlayingVideoId(selectedVideoId)
+                }}
+                disabled={
+                  !selectedVideoId ||
+                  scenes.filter((s) => (s.video_id ?? null) === selectedVideoId).length === 0
+                }
+                className="gap-2"
+                title="この動画の全シーンを冒頭から通し再生"
+              >
+                <Play size={16} />
+                通し再生
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => selectedVideoId && setExportingVideoId(selectedVideoId)}
                 disabled={
                   !selectedVideoId ||
@@ -1551,6 +1716,19 @@ export default function StoryboardPage() {
               >
                 <Type size={16} />
                 テロップ設定
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setCharReplaceFrom('')
+                  setCharReplaceTo('')
+                  setShowCharReplace(true)
+                }}
+                className="gap-2"
+                title="特定キャラのセリフを別キャラ or ナレーションに一括で置き換え"
+                disabled={characters.length === 0}
+              >
+                キャラ置換
               </Button>
               <Button
                 variant="outline"
@@ -3269,6 +3447,28 @@ export default function StoryboardPage() {
         </div>
       </main>
 
+      {/* Undo トースト: 削除直後に右下に出現し、8秒後に自動消去 */}
+      {undoToast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-foreground text-background px-4 py-3 rounded-lg shadow-lg border border-border max-w-sm">
+          <span className="text-sm">{undoToast.message}</span>
+          <button
+            type="button"
+            onClick={handleUndoDeletion}
+            className="text-sm font-semibold text-primary hover:underline"
+          >
+            元に戻す
+          </button>
+          <button
+            type="button"
+            onClick={() => setUndoToast(null)}
+            className="text-sm text-background/60 hover:text-background"
+            title="閉じる"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {(() => {
         const playScene = playingSceneId ? scenes.find((s) => s.id === playingSceneId) ?? null : null
         const exportScene = exportingSceneId ? scenes.find((s) => s.id === exportingSceneId) ?? null : null
@@ -3289,6 +3489,53 @@ export default function StoryboardPage() {
               sceneCast={playScene ? castForScene(playScene.id) : []}
               onClose={() => setPlayingSceneId(null)}
             />
+            {/* 動画連続再生: playingVideoId が立ってる間、対象シーンを順に再生 */}
+            {(() => {
+              if (!playingVideoId) return null
+              const orderedScenes = scenes
+                .filter((s) => (s.video_id ?? null) === playingVideoId)
+                .sort((a, b) => a.order_index - b.order_index)
+              const videoName = videos.find((v) => v.id === playingVideoId)?.name ?? '動画'
+              const currentScene = orderedScenes[playingVideoSceneIdx] ?? null
+              if (!currentScene) {
+                // 範囲外なら停止
+                return null
+              }
+              return (
+                <ScenePlayerDialog
+                  // key を切り替えると再マウントされて state がリセット→ autoPlay が効く
+                  key={`continuous-${playingVideoId}-${playingVideoSceneIdx}`}
+                  scene={currentScene}
+                  characters={characters}
+                  audioFiles={audioFiles}
+                  expressions={expressions}
+                  backgroundLayers={backgroundLayersForScene(currentScene)}
+                  bgmTrack={bgmForScene(currentScene)}
+                  bgmVolume={
+                    typeof currentScene.bgm_volume === 'number'
+                      ? currentScene.bgm_volume
+                      : 0.25
+                  }
+                  sounds={sounds}
+                  telopStyle={telopStyle}
+                  sceneCast={castForScene(currentScene.id)}
+                  autoPlay
+                  title={`${videoName}(通し再生)— ${playingVideoSceneIdx + 1}/${orderedScenes.length} ${currentScene.title}`}
+                  onQueueEnd={() => {
+                    if (playingVideoSceneIdx + 1 < orderedScenes.length) {
+                      setPlayingVideoSceneIdx((i) => i + 1)
+                    } else {
+                      setPlayingVideoId(null)
+                      setPlayingVideoSceneIdx(0)
+                    }
+                  }}
+                  onClose={() => {
+                    setPlayingVideoId(null)
+                    setPlayingVideoSceneIdx(0)
+                  }}
+                />
+              )
+            })()}
             {/* セリフ単体プレビュー: previewingSdId を含むシーンを対象に1セリフだけ再生 */}
             {(() => {
               const previewScene = previewingSdId
@@ -3396,6 +3643,83 @@ export default function StoryboardPage() {
                       disabled={bulkScriptText.trim().length === 0}
                     >
                       追加する
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+            {/* キャラ一括置換 */}
+            <Dialog open={showCharReplace} onOpenChange={(o) => setShowCharReplace(o)}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>キャラ一括置換</DialogTitle>
+                  <DialogDescription>
+                    指定キャラのセリフをまとめて別キャラ or ナレーションに置き換えます。
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-foreground mb-1">
+                      置換元キャラ
+                    </label>
+                    <select
+                      value={charReplaceFrom}
+                      onChange={(e) => setCharReplaceFrom(e.target.value)}
+                      className="w-full px-3 py-2 bg-background border border-input rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">-- キャラを選択 --</option>
+                      {characters.map((c) => {
+                        const count = dialogues.filter((d) => d.character_id === c.id).length
+                        return (
+                          <option key={c.id} value={c.id}>
+                            {c.name}({count} 件)
+                          </option>
+                        )
+                      })}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-foreground mb-1">
+                      置換先
+                    </label>
+                    <select
+                      value={charReplaceTo}
+                      onChange={(e) => setCharReplaceTo(e.target.value)}
+                      className="w-full px-3 py-2 bg-background border border-input rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">(ナレーション化)</option>
+                      {characters
+                        .filter((c) => c.id !== charReplaceFrom)
+                        .map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={charReplaceResetAudio}
+                      onChange={(e) => setCharReplaceResetAudio(e.target.checked)}
+                      className="accent-primary"
+                    />
+                    <span>音声と表情もリセット(推奨)</span>
+                  </label>
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowCharReplace(false)}
+                    >
+                      キャンセル
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleApplyCharReplace}
+                      disabled={!charReplaceFrom}
+                    >
+                      置換実行
                     </Button>
                   </div>
                 </div>
@@ -3561,6 +3885,9 @@ function ScenePlayerDialog({
   sceneCast,
   startAtSdId,
   singleMode,
+  autoPlay,
+  title,
+  onQueueEnd,
   onClose,
 }: {
   scene: SceneWithDialogues | null
@@ -3575,6 +3902,9 @@ function ScenePlayerDialog({
   sceneCast: SceneCastMember[]
   startAtSdId?: string | null // この SceneDialogue から再生を開始
   singleMode?: boolean // true のとき 1 セリフだけ再生して停止(プレビュー用)
+  autoPlay?: boolean // ダイアログ表示と同時に再生開始(連続再生用)
+  title?: string // タイトル上書き(連続再生時に「動画名 - シーンN」などを表示)
+  onQueueEnd?: () => void // キューを最後まで再生し終わったときに呼ばれる(連続再生ハンドオフ用)
   onClose: () => void
 }) {
   const [index, setIndex] = useState(0)
@@ -3585,11 +3915,11 @@ function ScenePlayerDialog({
   const pauseTimerRef = useRef<number | null>(null)
   const queueListRef = useRef<HTMLOListElement | null>(null)
 
-  // scene が変わったらリセット
+  // scene が変わったらリセット(autoPlay なら自動再生開始)
   useEffect(() => {
     setIndex(0)
-    setPlaying(false)
-  }, [scene?.id])
+    setPlaying(!!autoPlay && !!scene)
+  }, [scene?.id, autoPlay])
 
   // BGM: playing=true の間だけループ再生
   useEffect(() => {
@@ -3704,10 +4034,15 @@ function ScenePlayerDialog({
     const gap = Math.round((current?.pauseAfterMs ?? 0) / playbackRate)
     if (singleMode || !hasNext) {
       // 最後 or 1セリフモードは停止
-      if (gap > 0 && !singleMode) {
-        pauseTimerRef.current = window.setTimeout(() => setPlaying(false), gap)
-      } else {
+      const finalize = () => {
         setPlaying(false)
+        // 連続再生ハンドオフ: 1セリフモードでなく、親が次のシーンに渡したい場合に呼ぶ
+        if (!singleMode && onQueueEnd) onQueueEnd()
+      }
+      if (gap > 0 && !singleMode) {
+        pauseTimerRef.current = window.setTimeout(finalize, gap)
+      } else {
+        finalize()
       }
       return
     }
@@ -3774,7 +4109,7 @@ function ScenePlayerDialog({
     <Dialog open={!!scene} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{scene.title} を再生</DialogTitle>
+          <DialogTitle>{title ?? `${scene.title} を再生`}</DialogTitle>
           <DialogDescription>
             キャラと音声が設定されたセリフを順番に再生します(
             {queue.length} / {scene.dialogues.length} 件が対象)
