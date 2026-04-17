@@ -1,11 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Music, Users, MessageSquare, Film, Plus, Trash2, Edit2, GripVertical, Layers, Play, Square, SkipForward } from 'lucide-react'
+import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward } from 'lucide-react'
+import { Sidebar } from '@/components/sidebar'
 import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression } from '@/types/db'
 import {
   deleteScene,
@@ -192,42 +192,8 @@ export default function StoryboardPage() {
 
   return (
     <div className="flex h-screen bg-background">
-      {/* サイドバー */}
-      <aside className="w-64 bg-sidebar border-r border-sidebar-border p-6">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-sidebar-primary">アニメ制作</h1>
-          <p className="text-sm text-muted-foreground mt-1">制作支援ツール</p>
-        </div>
+      <Sidebar />
 
-        <nav className="space-y-2">
-          <Link href="/" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <Film size={20} />
-            ダッシュボード
-          </Link>
-          <Link href="/characters" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <Users size={20} />
-            キャラクター
-          </Link>
-          <Link href="/illustrations" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <Layers size={20} />
-            イラスト
-          </Link>
-          <Link href="/audio" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <Music size={20} />
-            音声
-          </Link>
-          <Link href="/dialogues" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <MessageSquare size={20} />
-            セリフ
-          </Link>
-          <Link href="/storyboard" className="flex items-center gap-3 px-4 py-3 rounded-lg bg-sidebar-primary/20 text-sidebar-primary font-medium">
-            <Film size={20} />
-            ストーリーボード
-          </Link>
-        </nav>
-      </aside>
-
-      {/* メインコンテンツ */}
       <main className="flex-1 overflow-auto">
         <div className="p-8">
           <div className="flex items-center justify-between mb-8">

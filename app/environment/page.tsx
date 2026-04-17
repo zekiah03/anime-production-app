@@ -1,15 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
-  Music,
-  Users,
-  MessageSquare,
-  Film,
   Plus,
   Trash2,
   Eye,
@@ -30,8 +25,11 @@ import {
   saveLayer,
   saveLayersBatch,
 } from '@/lib/db'
+import { Sidebar } from '@/components/sidebar'
 
-export default function IllustrationsPage() {
+// 「環境」タブ: 背景・小物など、キャラに依存しない素材を管理する。
+// 内部的には Illustration/Layer エンティティをそのまま使う(背景イラストなどが既に入っているかもしれないため)。
+export default function EnvironmentPage() {
   const [illustrations, setIllustrations] = useState<IllustrationWithLayers[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [newIllustrationName, setNewIllustrationName] = useState('')
@@ -43,7 +41,6 @@ export default function IllustrationsPage() {
   useEffect(() => {
     getAllIllustrations()
       .then(async (rows) => {
-        // 各イラストのレイヤーも読み込む
         const withLayers = await Promise.all(
           rows.map(async (r) => ({
             ...r,
@@ -52,7 +49,7 @@ export default function IllustrationsPage() {
         )
         setIllustrations(withLayers)
       })
-      .catch((e) => console.error('[anime-app] load illustrations failed', e))
+      .catch((e) => console.error('[anime-app] load environment failed', e))
       .finally(() => setLoading(false))
   }, [])
 
@@ -74,7 +71,7 @@ export default function IllustrationsPage() {
   }
 
   async function handleDeleteIllustration(id: string) {
-    if (!confirm('このイラスト(とすべてのレイヤー)を削除してよろしいですか？')) return
+    if (!confirm('この素材(とすべてのレイヤー)を削除してよろしいですか？')) return
     const target = illustrations.find((i) => i.id === id)
     target?.layers.forEach((l) => {
       if (l.image_url.startsWith('blob:')) URL.revokeObjectURL(l.image_url)
@@ -175,14 +172,12 @@ export default function IllustrationsPage() {
     const layer = selected.layers.find((l) => l.id === layerId)
     if (!layer) return
     const updated = { ...layer, opacity }
-    // UIはスライダー操作のたびにサンプル書き込みしたくないので、ローカル先行 → IndexedDBにfire-and-forget
     updateLayersLocal(selected.id, (layers) =>
       layers.map((l) => (l.id === layerId ? updated : l)),
     )
     saveLayer(updated).catch((e) => console.error('[anime-app] save opacity failed', e))
   }
 
-  // UIでは「上が前面」なので order_index 降順で並べる。上下ボタンで order を入れ替える
   async function handleMoveLayer(layerId: string, direction: 'up' | 'down') {
     if (!selected) return
     const sortedDesc = [...selected.layers].sort((a, b) => b.order_index - a.order_index)
@@ -210,60 +205,25 @@ export default function IllustrationsPage() {
 
   return (
     <div className="flex h-screen bg-background">
-      {/* サイドバー */}
-      <aside className="w-64 bg-sidebar border-r border-sidebar-border p-6">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-sidebar-primary">アニメ制作</h1>
-          <p className="text-sm text-muted-foreground mt-1">制作支援ツール</p>
-        </div>
+      <Sidebar />
 
-        <nav className="space-y-2">
-          <Link href="/" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <Film size={20} />
-            ダッシュボード
-          </Link>
-          <Link href="/characters" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <Users size={20} />
-            キャラクター
-          </Link>
-          <Link href="/illustrations" className="flex items-center gap-3 px-4 py-3 rounded-lg bg-sidebar-primary/20 text-sidebar-primary font-medium">
-            <Layers size={20} />
-            イラスト
-          </Link>
-          <Link href="/audio" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <Music size={20} />
-            音声
-          </Link>
-          <Link href="/dialogues" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <MessageSquare size={20} />
-            セリフ
-          </Link>
-          <Link href="/storyboard" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <Film size={20} />
-            ストーリーボード
-          </Link>
-        </nav>
-      </aside>
-
-      {/* メインコンテンツ */}
       <main className="flex-1 overflow-auto">
         <div className="p-8">
           <div className="flex items-center justify-between mb-8">
             <div>
-              <h2 className="text-3xl font-bold text-foreground">イラスト管理</h2>
-              <p className="text-muted-foreground mt-1">画像・レイヤーを積み重ねて一枚絵を構成</p>
+              <h2 className="text-3xl font-bold text-foreground">環境素材</h2>
+              <p className="text-muted-foreground mt-1">背景・小物などキャラ非依存の素材を管理(複数レイヤーで構成可)</p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* 左: イラスト一覧 */}
             <div>
               <Card className="bg-card border-border p-6">
-                <h3 className="text-lg font-semibold text-foreground mb-4">イラスト一覧</h3>
+                <h3 className="text-lg font-semibold text-foreground mb-4">素材一覧</h3>
                 <form onSubmit={handleCreateIllustration} className="flex gap-2 mb-4">
                   <Input
                     type="text"
-                    placeholder="新規イラスト名"
+                    placeholder="新規素材名(例: 教室背景)"
                     value={newIllustrationName}
                     onChange={(e) => setNewIllustrationName(e.target.value)}
                     className="bg-background border-input"
@@ -279,7 +239,7 @@ export default function IllustrationsPage() {
                   </div>
                 ) : illustrations.length === 0 ? (
                   <div className="text-center py-8 text-sm text-muted-foreground">
-                    イラストがまだありません
+                    素材がまだありません
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -318,13 +278,12 @@ export default function IllustrationsPage() {
               </Card>
             </div>
 
-            {/* 右: 選択中のイラスト詳細 */}
             <div className="lg:col-span-2">
               {!selected ? (
                 <Card className="bg-card border-border p-12 text-center">
                   <Layers size={48} className="mx-auto text-muted-foreground mb-4" />
                   <h3 className="text-xl font-semibold text-foreground mb-2">
-                    イラストを選択してください
+                    素材を選択してください
                   </h3>
                   <p className="text-muted-foreground">
                     左の一覧から選ぶか、新しく作成してください
@@ -332,10 +291,9 @@ export default function IllustrationsPage() {
                 </Card>
               ) : (
                 <div className="space-y-6">
-                  {/* タイトル(編集可能) */}
                   <Card className="bg-card border-border p-4">
                     <label className="block text-xs font-medium text-muted-foreground mb-1">
-                      イラスト名
+                      素材名
                     </label>
                     <Input
                       type="text"
@@ -345,7 +303,6 @@ export default function IllustrationsPage() {
                     />
                   </Card>
 
-                  {/* プレビュー */}
                   <Card className="bg-card border-border p-4">
                     <h4 className="text-sm font-semibold text-foreground mb-3">プレビュー</h4>
                     <div
@@ -373,7 +330,6 @@ export default function IllustrationsPage() {
                     </div>
                   </Card>
 
-                  {/* レイヤー一覧 */}
                   <Card className="bg-card border-border p-4">
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="text-sm font-semibold text-foreground">レイヤー (上が前面)</h4>
@@ -411,7 +367,6 @@ export default function IllustrationsPage() {
                             key={layer.id}
                             className="flex items-center gap-3 p-3 bg-background rounded-lg border border-border"
                           >
-                            {/* サムネ */}
                             <div className="w-12 h-12 flex-shrink-0 bg-[repeating-conic-gradient(#e5e7eb_0%_25%,transparent_0%_50%)] bg-[length:8px_8px] rounded overflow-hidden border border-border">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img
@@ -421,7 +376,6 @@ export default function IllustrationsPage() {
                               />
                             </div>
 
-                            {/* 名前と不透明度 */}
                             <div className="flex-1 min-w-0 space-y-1">
                               <Input
                                 type="text"
@@ -450,7 +404,6 @@ export default function IllustrationsPage() {
                               </div>
                             </div>
 
-                            {/* 操作ボタン群 */}
                             <div className="flex items-center gap-1 flex-shrink-0">
                               <button
                                 onClick={() => handleMoveLayer(layer.id, 'up')}

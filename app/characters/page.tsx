@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,32 +11,33 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
-  Music,
   Users,
-  MessageSquare,
-  Film,
   Plus,
   Trash2,
   Edit2,
-  Layers,
   ImagePlus,
   Sparkles,
   Play,
   Square,
   Smile,
 } from 'lucide-react'
-import type { AudioFile, Character, CharacterExpression, ExpressionKind } from '@/types/db'
+import type { AudioFile, Character, CharacterExpression, Dialogue, ExpressionKind } from '@/types/db'
 import {
   deleteCharacter,
   deleteExpression,
   getAllAudioFiles,
   getAllCharacters,
+  getAllDialogues,
   getExpressionsByCharacter,
   saveCharacter,
   saveExpression,
 } from '@/lib/db'
 import { LipSyncStage } from '@/components/lip-sync-stage'
+import { Sidebar } from '@/components/sidebar'
+import { CharacterAudioTab } from '@/components/character-audio-tab'
+import { CharacterDialoguesTab } from '@/components/character-dialogues-tab'
 
 const KIND_LABEL: Record<ExpressionKind, string> = {
   mouth_closed: '口閉じ',
@@ -142,39 +142,7 @@ export default function CharactersPage() {
 
   return (
     <div className="flex h-screen bg-background">
-      <aside className="w-64 bg-sidebar border-r border-sidebar-border p-6">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-sidebar-primary">アニメ制作</h1>
-          <p className="text-sm text-muted-foreground mt-1">制作支援ツール</p>
-        </div>
-
-        <nav className="space-y-2">
-          <Link href="/" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <Film size={20} />
-            ダッシュボード
-          </Link>
-          <Link href="/characters" className="flex items-center gap-3 px-4 py-3 rounded-lg bg-sidebar-primary/20 text-sidebar-primary font-medium">
-            <Users size={20} />
-            キャラクター
-          </Link>
-          <Link href="/illustrations" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <Layers size={20} />
-            イラスト
-          </Link>
-          <Link href="/audio" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <Music size={20} />
-            音声
-          </Link>
-          <Link href="/dialogues" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <MessageSquare size={20} />
-            セリフ
-          </Link>
-          <Link href="/storyboard" className="flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground hover:bg-sidebar-accent/20 transition">
-            <Film size={20} />
-            ストーリーボード
-          </Link>
-        </nav>
-      </aside>
+      <Sidebar />
 
       <main className="flex-1 overflow-auto">
         <div className="p-8">
@@ -350,6 +318,7 @@ function CharacterDetailDialog({
 }) {
   const [expressions, setExpressions] = useState<CharacterExpression[]>([])
   const [audioFiles, setAudioFiles] = useState<AudioFile[]>([])
+  const [dialogues, setDialogues] = useState<Dialogue[]>([])
   const [loading, setLoading] = useState(false)
   const [newExprName, setNewExprName] = useState('')
   const [newExprKind, setNewExprKind] = useState<ExpressionKind>('mouth_open')
@@ -359,10 +328,11 @@ function CharacterDetailDialog({
   useEffect(() => {
     if (!character) return
     setLoading(true)
-    Promise.all([getExpressionsByCharacter(character.id), getAllAudioFiles()])
-      .then(([exprs, audios]) => {
+    Promise.all([getExpressionsByCharacter(character.id), getAllAudioFiles(), getAllDialogues()])
+      .then(([exprs, audios, dials]) => {
         setExpressions(exprs)
         setAudioFiles(audios.filter((a) => a.character_id === character.id))
+        setDialogues(dials.filter((d) => d.character_id === character.id))
       })
       .catch((e) => console.error('[anime-app] load character detail failed', e))
       .finally(() => setLoading(false))
@@ -403,87 +373,132 @@ function CharacterDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-auto">
         <DialogHeader>
           <DialogTitle>{character?.name ?? ''} の詳細</DialogTitle>
-          <DialogDescription>表情パターンの登録と、音声に合わせた自動リップシンクのプレビューができます</DialogDescription>
+          <DialogDescription>表情・音声・セリフをタブから管理できます</DialogDescription>
         </DialogHeader>
 
-        {loading ? (
+        {loading || !character ? (
           <p className="text-center text-muted-foreground py-8">読み込み中...</p>
         ) : (
-          <div className="space-y-6">
-            {/* リップシンクプレビュー */}
-            {character && (
-              <LipSyncPreview character={character} expressions={expressions} audioFiles={audioFiles} />
-            )}
+          <Tabs defaultValue="preview" className="w-full">
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="preview">プレビュー</TabsTrigger>
+              <TabsTrigger value="expressions">表情</TabsTrigger>
+              <TabsTrigger value="audio">音声</TabsTrigger>
+              <TabsTrigger value="dialogues">セリフ</TabsTrigger>
+            </TabsList>
 
-            {/* 表情追加 */}
-            <div className="border border-border rounded-lg p-4">
-              <h4 className="font-semibold text-foreground mb-3 flex items-center gap-2">
-                <Smile size={18} /> 表情を追加
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-                <Input
-                  placeholder="表情名(例: 笑顔)"
-                  value={newExprName}
-                  onChange={(e) => setNewExprName(e.target.value)}
-                />
-                <select
-                  value={newExprKind}
-                  onChange={(e) => setNewExprKind(e.target.value as ExpressionKind)}
-                  className="px-3 py-2 bg-background border border-input rounded-md text-sm"
+            <TabsContent value="preview" className="mt-4">
+              <LipSyncPreview
+                character={character}
+                expressions={expressions}
+                audioFiles={audioFiles}
+              />
+            </TabsContent>
+
+            <TabsContent value="expressions" className="mt-4 space-y-6">
+              <div className="border border-border rounded-lg p-4">
+                <h4 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+                  <Smile size={18} /> 表情を追加
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                  <Input
+                    placeholder="表情名(例: 笑顔)"
+                    value={newExprName}
+                    onChange={(e) => setNewExprName(e.target.value)}
+                  />
+                  <select
+                    value={newExprKind}
+                    onChange={(e) => setNewExprKind(e.target.value as ExpressionKind)}
+                    className="px-3 py-2 bg-background border border-input rounded-md text-sm"
+                  >
+                    <option value="mouth_open">口開け(リップシンク用)</option>
+                    <option value="mouth_closed">口閉じ(リップシンク用)</option>
+                    <option value="expression">表情バリエーション</option>
+                  </select>
+                  <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-3 py-2 bg-background border border-input rounded-md text-sm hover:bg-accent/20 transition">
+                    <ImagePlus size={16} />
+                    画像を選択
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleNewExprImage}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+                {newExprPreview && (
+                  <div className="flex items-center gap-3 mb-3">
+                    <img
+                      src={newExprPreview}
+                      alt="プレビュー"
+                      className="h-16 w-16 rounded-md object-cover border border-border"
+                    />
+                    <span className="text-sm text-muted-foreground">プレビュー</span>
+                  </div>
+                )}
+                <Button
+                  size="sm"
+                  onClick={handleAddExpression}
+                  disabled={!newExprBlob || !newExprName.trim()}
                 >
-                  <option value="mouth_open">口開け(リップシンク用)</option>
-                  <option value="mouth_closed">口閉じ(リップシンク用)</option>
-                  <option value="expression">表情バリエーション</option>
-                </select>
-                <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-3 py-2 bg-background border border-input rounded-md text-sm hover:bg-accent/20 transition">
-                  <ImagePlus size={16} />
-                  画像を選択
-                  <input type="file" accept="image/*" onChange={handleNewExprImage} className="hidden" />
-                </label>
+                  追加
+                </Button>
               </div>
-              {newExprPreview && (
-                <div className="flex items-center gap-3 mb-3">
-                  <img src={newExprPreview} alt="プレビュー" className="h-16 w-16 rounded-md object-cover border border-border" />
-                  <span className="text-sm text-muted-foreground">プレビュー</span>
-                </div>
-              )}
-              <Button size="sm" onClick={handleAddExpression} disabled={!newExprBlob || !newExprName.trim()}>
-                追加
-              </Button>
-            </div>
 
-            {/* 表情一覧 */}
-            <div>
-              <h4 className="font-semibold text-foreground mb-3">登録済みの表情</h4>
-              {expressions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">まだ表情が登録されていません</p>
-              ) : (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {expressions.map((e) => (
-                    <div key={e.id} className="border border-border rounded-md p-2 bg-card">
-                      <img src={e.image_url} alt={e.name} className="w-full aspect-square object-cover rounded" />
-                      <div className="mt-2 flex items-start justify-between gap-1">
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-foreground truncate">{e.name}</p>
-                          <p className="text-xs text-muted-foreground">{KIND_LABEL[e.kind]}</p>
+              <div>
+                <h4 className="font-semibold text-foreground mb-3">登録済みの表情</h4>
+                {expressions.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">まだ表情が登録されていません</p>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {expressions.map((e) => (
+                      <div key={e.id} className="border border-border rounded-md p-2 bg-card">
+                        <img
+                          src={e.image_url}
+                          alt={e.name}
+                          className="w-full aspect-square object-cover rounded"
+                        />
+                        <div className="mt-2 flex items-start justify-between gap-1">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground truncate">{e.name}</p>
+                            <p className="text-xs text-muted-foreground">{KIND_LABEL[e.kind]}</p>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteExpression(e.id)}
+                            className="p-1 hover:bg-destructive/20 rounded transition flex-shrink-0"
+                            aria-label="削除"
+                          >
+                            <Trash2 size={14} className="text-destructive" />
+                          </button>
                         </div>
-                        <button
-                          onClick={() => handleDeleteExpression(e.id)}
-                          className="p-1 hover:bg-destructive/20 rounded transition flex-shrink-0"
-                          aria-label="削除"
-                        >
-                          <Trash2 size={14} className="text-destructive" />
-                        </button>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
+            <TabsContent value="audio" className="mt-4">
+              <CharacterAudioTab
+                character={character}
+                audioFiles={audioFiles}
+                onChange={setAudioFiles}
+              />
+            </TabsContent>
+
+            <TabsContent value="dialogues" className="mt-4">
+              <CharacterDialoguesTab
+                character={character}
+                dialogues={dialogues}
+                audioFiles={audioFiles}
+                expressions={expressions}
+                onChange={setDialogues}
+              />
+            </TabsContent>
+          </Tabs>
         )}
       </DialogContent>
     </Dialog>
