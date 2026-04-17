@@ -17,7 +17,9 @@ import {
   Image as ImageIcon,
   Music,
   Zap,
+  Sparkles,
 } from 'lucide-react'
+import { generateSampleBgmTracks, generateSampleSoundEffects } from '@/lib/sample-audio'
 import type { BgmTrack, IllustrationWithLayers, Layer, Illustration, SoundEffect } from '@/types/db'
 import {
   deleteBgmTrack,
@@ -54,6 +56,10 @@ export default function EnvironmentPage() {
   const [sounds, setSounds] = useState<SoundEffect[]>([])
   const [seLoading, setSeLoading] = useState(true)
   const seInputRef = useRef<HTMLInputElement | null>(null)
+
+  // サンプル生成中フラグ
+  const [seedingBgm, setSeedingBgm] = useState(false)
+  const [seedingSe, setSeedingSe] = useState(false)
 
   const selected = illustrations.find((i) => i.id === selectedId) ?? null
 
@@ -122,6 +128,64 @@ export default function EnvironmentPage() {
     const updated = { ...existing, name }
     await saveSoundEffect(updated)
     setSounds((prev) => prev.map((t) => (t.id === id ? updated : t)))
+  }
+
+  // ==================== サンプル生成(Web Audio で合成) ====================
+
+  async function handleSeedBgm() {
+    if (seedingBgm) return
+    setSeedingBgm(true)
+    try {
+      const clips = await generateSampleBgmTracks()
+      const now = new Date().toISOString()
+      const newTracks: BgmTrack[] = []
+      for (const clip of clips) {
+        const track: BgmTrack = {
+          id: crypto.randomUUID(),
+          name: clip.name,
+          file_url: URL.createObjectURL(clip.blob),
+          file_blob: clip.blob,
+          duration: clip.duration,
+          created_at: now,
+        }
+        await saveBgmTrack(track)
+        newTracks.push(track)
+      }
+      setBgmTracks((prev) => [...newTracks, ...prev])
+    } catch (e) {
+      console.error('[anime-app] seed bgm failed', e)
+      alert('BGMサンプル生成に失敗しました')
+    } finally {
+      setSeedingBgm(false)
+    }
+  }
+
+  async function handleSeedSe() {
+    if (seedingSe) return
+    setSeedingSe(true)
+    try {
+      const clips = await generateSampleSoundEffects()
+      const now = new Date().toISOString()
+      const newItems: SoundEffect[] = []
+      for (const clip of clips) {
+        const se: SoundEffect = {
+          id: crypto.randomUUID(),
+          name: clip.name,
+          file_url: URL.createObjectURL(clip.blob),
+          file_blob: clip.blob,
+          duration: clip.duration,
+          created_at: now,
+        }
+        await saveSoundEffect(se)
+        newItems.push(se)
+      }
+      setSounds((prev) => [...newItems, ...prev])
+    } catch (e) {
+      console.error('[anime-app] seed se failed', e)
+      alert('SEサンプル生成に失敗しました')
+    } finally {
+      setSeedingSe(false)
+    }
   }
 
   // ==================== BGM handlers ====================
@@ -619,7 +683,7 @@ export default function EnvironmentPage() {
                       シーンに割り当てると会話と並行して再生されます(ループ・音量調整あり)
                     </p>
                   </div>
-                  <div>
+                  <div className="flex gap-2">
                     <input
                       ref={bgmInputRef}
                       type="file"
@@ -631,6 +695,17 @@ export default function EnvironmentPage() {
                         if (bgmInputRef.current) bgmInputRef.current.value = ''
                       }}
                     />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleSeedBgm}
+                      disabled={seedingBgm}
+                      className="gap-1"
+                      title="Web Audio で合成した権利フリーのサンプルを追加します"
+                    >
+                      <Sparkles size={14} />
+                      {seedingBgm ? '生成中…' : 'サンプル追加'}
+                    </Button>
                     <Button
                       size="sm"
                       onClick={() => bgmInputRef.current?.click()}
@@ -696,7 +771,7 @@ export default function EnvironmentPage() {
                       セリフの冒頭で鳴らす短いクリップ(ピコッ・ドンッ等)
                     </p>
                   </div>
-                  <div>
+                  <div className="flex gap-2">
                     <input
                       ref={seInputRef}
                       type="file"
@@ -708,6 +783,17 @@ export default function EnvironmentPage() {
                         if (seInputRef.current) seInputRef.current.value = ''
                       }}
                     />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleSeedSe}
+                      disabled={seedingSe}
+                      className="gap-1"
+                      title="Web Audio で合成した権利フリーのサンプルを追加します"
+                    >
+                      <Sparkles size={14} />
+                      {seedingSe ? '生成中…' : 'サンプル追加'}
+                    </Button>
                     <Button size="sm" onClick={() => seInputRef.current?.click()} className="gap-1">
                       <Upload size={14} />
                       SE追加
