@@ -262,12 +262,13 @@ export function CharacterDialoguesTab({
                   </div>
                 </div>
                 {isPlaying && (
-                  <div className="mt-3 max-w-[180px]">
+                  <div className="mt-3 max-w-[240px]">
                     <LipSyncStage
                       character={character}
                       expressions={expressions}
                       audioUrl={audio?.file_url ?? null}
                       overrideExpressionId={d.expression_id}
+                      caption={d.text}
                       playing={isPlaying}
                       onEnded={() => setPlayingId(null)}
                     />

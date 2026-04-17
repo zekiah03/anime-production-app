@@ -537,6 +537,7 @@ function ScenePlayerDialog({
                 expressions={current?.charExpressions ?? []}
                 audioUrl={current?.audio?.file_url ?? null}
                 overrideExpressionId={current?.expressionId ?? null}
+                caption={current?.text ?? null}
                 playing={playing}
                 onEnded={handleEnded}
               />

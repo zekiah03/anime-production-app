@@ -11,6 +11,7 @@ interface LipSyncStageProps {
   overrideExpressionId?: string | null
   threshold?: number
   playing: boolean
+  caption?: string | null
   onEnded?: () => void
   className?: string
 }
@@ -24,6 +25,7 @@ export function LipSyncStage({
   overrideExpressionId,
   threshold = 40,
   playing,
+  caption,
   onEnded,
   className,
 }: LipSyncStageProps) {
@@ -151,6 +153,18 @@ export function LipSyncStage({
         <div className="text-center text-muted-foreground p-4">
           <Users size={32} className="mx-auto mb-2" />
           <p className="text-xs">画像を登録してください</p>
+        </div>
+      )}
+      {caption && playing && (
+        <div className="absolute inset-x-2 bottom-2 pointer-events-none">
+          <div className="mx-auto max-w-[95%] text-center">
+            <span
+              className="inline-block px-3 py-1.5 rounded bg-black/70 text-white text-sm md:text-base font-bold leading-tight"
+              style={{ textShadow: '1px 1px 2px rgba(0,0,0,0.9)' }}
+            >
+              {caption}
+            </span>
+          </div>
         </div>
       )}
       <audio ref={audioRef} src={audioUrl ?? undefined} onEnded={handleEnded} preload="auto" />
