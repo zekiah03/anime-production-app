@@ -8,6 +8,7 @@ import type {
   CharacterExpression,
   AudioFile,
   BgmTrack,
+  CastPreset,
   Dialogue,
   Scene,
   SceneDialogue,
@@ -21,7 +22,7 @@ import type {
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 
 const DB_NAME = 'anime-production'
-const DB_VERSION = 7
+const DB_VERSION = 8
 
 // 永続化形式 (file_url / image_url は実行時に Blob から生成するので保存しない)
 type StoredCharacter = Omit<Character, 'image_url'> & { image_blob?: Blob }
@@ -72,6 +73,8 @@ interface AnimeDB extends DBSchema {
   }
   // 動画(シーンの入れ物)
   videos: { key: string; value: Video }
+  // キャスト配置プリセット(シーンの登場キャラ構成を使い回す)
+  cast_presets: { key: string; value: CastPreset }
 }
 
 let dbPromise: Promise<IDBPDatabase<AnimeDB>> | null = null
@@ -129,6 +132,9 @@ function getDB() {
         }
         if (!db.objectStoreNames.contains('videos')) {
           db.createObjectStore('videos', { keyPath: 'id' })
+        }
+        if (!db.objectStoreNames.contains('cast_presets')) {
+          db.createObjectStore('cast_presets', { keyPath: 'id' })
         }
       },
     })
@@ -493,6 +499,24 @@ export async function deleteSoundEffect(id: string): Promise<void> {
     }
   }
   await tx.done
+}
+
+// ==================== Cast Presets ====================
+
+export async function getAllCastPresets(): Promise<CastPreset[]> {
+  const db = await getDB()
+  const all = await db.getAll('cast_presets')
+  return all.sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+}
+
+export async function saveCastPreset(preset: CastPreset): Promise<void> {
+  const db = await getDB()
+  await db.put('cast_presets', preset)
+}
+
+export async function deleteCastPreset(id: string): Promise<void> {
+  const db = await getDB()
+  await db.delete('cast_presets', id)
 }
 
 // ==================== Videos(シーンの入れ物) ====================

@@ -138,6 +138,8 @@ export interface SceneDialogue {
   character_scale: number
   // キャラクターの左右反転(斜め前を向いている立ち絵を逆向きにする)
   character_flipped?: boolean
+  // このセリフを終えてから次に進むまでの追加無音時間 ms(間合い)
+  pause_after_ms?: number
   created_at: string
 }
 
@@ -157,6 +159,24 @@ export interface SceneWithDialogues extends Scene {
       dialogue: Dialogue | null
     }
   >
+}
+
+// キャスト配置のプリセット(シーンの 登場キャラ 構成を保存・呼び出し)
+export interface CastPresetMember {
+  character_id: string
+  x: number
+  scale: number
+  idle_expression_id: string | null
+  order_index: number
+  flipped?: boolean
+}
+
+export interface CastPreset {
+  id: string
+  name: string
+  members: CastPresetMember[]
+  created_at: string
+  updated_at: string
 }
 
 // シーンの「登場キャラ」。 speaker 以外は無音で立ち、speaker はリップシンクする。

@@ -10,15 +10,17 @@ import { SceneExportDialog } from '@/components/scene-export-dialog'
 import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
 import { SceneTimelineBar, type TimelineClip } from '@/components/scene-timeline'
 import { VideoExportDialog } from '@/components/video-export-dialog'
-import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, SceneCastMember, Video } from '@/types/db'
+import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, SceneCastMember, Video, CastPreset } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
+  deleteCastPreset,
   deleteScene,
   deleteSceneCastMember,
   deleteSceneDialogue,
   deleteVideo,
   getAllAudioFiles,
   getAllBgmTracks,
+  getAllCastPresets,
   getAllCharacters,
   getAllDialogues,
   getAllExpressions,
@@ -30,6 +32,7 @@ import {
   getAllVideos,
   getLayersByIllustration,
   getTelopStyle,
+  saveCastPreset,
   saveDialogue,
   saveScene,
   saveSceneCastMember,
@@ -61,6 +64,7 @@ export default function StoryboardPage() {
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null)
   const [editingVideoId, setEditingVideoId] = useState<string | null>(null)
   const [editingVideoName, setEditingVideoName] = useState('')
+  const [castPresets, setCastPresets] = useState<CastPreset[]>([])
   const [loading, setLoading] = useState(true)
   const [showSceneForm, setShowSceneForm] = useState(false)
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null)
@@ -76,6 +80,7 @@ export default function StoryboardPage() {
   const [dialogueToAdd, setDialogueToAdd] = useState('')
   const [draggedSceneId, setDraggedSceneId] = useState<string | null>(null)
   const [playingSceneId, setPlayingSceneId] = useState<string | null>(null)
+  const [previewingSdId, setPreviewingSdId] = useState<string | null>(null)
   const [exportingSceneId, setExportingSceneId] = useState<string | null>(null)
   const [exportingVideoId, setExportingVideoId] = useState<string | null>(null)
   const [telopStyle, setTelopStyle] = useState<TelopStyle>(DEFAULT_TELOP_STYLE)
@@ -91,7 +96,7 @@ export default function StoryboardPage() {
 
   async function loadAll() {
     try {
-      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts, allBgm, allSe, savedTelop, allCast, loadedVideos] = await Promise.all([
+      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts, allBgm, allSe, savedTelop, allCast, loadedVideos, loadedPresets] = await Promise.all([
         getAllScenes(),
         getAllSceneDialogues(),
         getAllDialogues(),
@@ -104,6 +109,7 @@ export default function StoryboardPage() {
         getTelopStyle(),
         getAllSceneCast(),
         getAllVideos(),
+        getAllCastPresets(),
       ])
 
       // 旧データ互換: 動画が1つもなく、未分類シーンがある場合は自動で「動画1」を作って全シーンを移す
@@ -162,6 +168,7 @@ export default function StoryboardPage() {
       setTelopStyle(savedTelop)
       setCast(allCast)
       setVideos(workingVideos)
+      setCastPresets(loadedPresets)
       // デフォルト選択: 先頭の動画
       setSelectedVideoId((prev) => prev ?? workingVideos[0]?.id ?? null)
     } catch (e) {
@@ -274,6 +281,7 @@ export default function StoryboardPage() {
       character_scale:
         typeof sd.character_scale === 'number' ? sd.character_scale : 1.0,
       character_flipped: sd.character_flipped ?? false,
+      pause_after_ms: typeof sd.pause_after_ms === 'number' ? sd.pause_after_ms : 0,
       created_at: now,
       dialogue: sd.dialogue,
     }))
@@ -325,6 +333,7 @@ export default function StoryboardPage() {
       character_x: typeof sd.character_x === 'number' ? sd.character_x : 0.5,
       character_scale: typeof sd.character_scale === 'number' ? sd.character_scale : 1.0,
       character_flipped: sd.character_flipped ?? false,
+      pause_after_ms: typeof sd.pause_after_ms === 'number' ? sd.pause_after_ms : 0,
       created_at: now,
     }
     await saveSceneDialogue(newSd)
@@ -411,6 +420,8 @@ export default function StoryboardPage() {
           character_scale:
             typeof sd.character_scale === 'number' ? sd.character_scale : 1.0,
           character_flipped: sd.character_flipped ?? false,
+          pause_after_ms:
+            typeof sd.pause_after_ms === 'number' ? sd.pause_after_ms : 0,
           created_at: sd.created_at,
         }
         return saveSceneDialogue(row)
@@ -465,6 +476,70 @@ export default function StoryboardPage() {
     setCast((prev) => prev.filter((c) => c.id !== memberId))
   }
 
+  // 現在のシーンの登場キャラ構成をプリセットとして保存
+  async function handleSaveCastPreset(sceneId: string) {
+    const members = castForScene(sceneId)
+    if (members.length === 0) {
+      alert('保存できる登場キャラがいません')
+      return
+    }
+    const name = window.prompt('プリセット名を入力してください', `プリセット${castPresets.length + 1}`)
+    if (!name || !name.trim()) return
+    const now = new Date().toISOString()
+    const preset: CastPreset = {
+      id: crypto.randomUUID(),
+      name: name.trim(),
+      members: members.map((m) => ({
+        character_id: m.character_id,
+        x: m.x,
+        scale: m.scale,
+        idle_expression_id: m.idle_expression_id,
+        order_index: m.order_index,
+        flipped: m.flipped ?? false,
+      })),
+      created_at: now,
+      updated_at: now,
+    }
+    await saveCastPreset(preset)
+    setCastPresets((prev) => [preset, ...prev])
+  }
+
+  // プリセットを別シーンに適用(既存のキャストは置き換える)
+  async function handleApplyCastPreset(sceneId: string, presetId: string) {
+    const preset = castPresets.find((p) => p.id === presetId)
+    if (!preset) return
+    if (
+      !window.confirm(
+        `プリセット「${preset.name}」を適用します。現在の登場キャラは上書きされます。よろしいですか?`,
+      )
+    )
+      return
+    const existing = cast.filter((c) => c.scene_id === sceneId)
+    await Promise.all(existing.map((c) => deleteSceneCastMember(c.id)))
+    const now = new Date().toISOString()
+    const newMembers: SceneCastMember[] = preset.members.map((m) => ({
+      id: crypto.randomUUID(),
+      scene_id: sceneId,
+      character_id: m.character_id,
+      x: m.x,
+      scale: m.scale,
+      idle_expression_id: m.idle_expression_id,
+      order_index: m.order_index,
+      flipped: m.flipped ?? false,
+      created_at: now,
+    }))
+    await Promise.all(newMembers.map((m) => saveSceneCastMember(m)))
+    setCast((prev) => [...prev.filter((c) => c.scene_id !== sceneId), ...newMembers])
+  }
+
+  async function handleDeleteCastPreset(presetId: string) {
+    const p = castPresets.find((x) => x.id === presetId)
+    if (!p) return
+    if (!window.confirm(`プリセット「${p.name}」を削除しますか?`)) return
+    await deleteCastPreset(presetId)
+    setCastPresets((prev) => prev.filter((x) => x.id !== presetId))
+  }
+
   // ナレーション(character_id=null の Dialogue)を新規作成してシーンに追加する
   async function handleAddNarration(sceneId: string) {
     const text = narrationText.trim()
@@ -497,6 +572,7 @@ export default function StoryboardPage() {
       se_volume: 1,
       character_x: 0.5,
       character_scale: 1.0,
+      pause_after_ms: 0,
       created_at: now,
     }
     await saveSceneDialogue(newSd)
@@ -609,6 +685,7 @@ export default function StoryboardPage() {
       se_volume: 1,
       character_x: 0.5,
       character_scale: 1.0,
+      pause_after_ms: 0,
       created_at: now,
     }
     await saveSceneDialogue(newSceneDialogue)
@@ -623,14 +700,19 @@ export default function StoryboardPage() {
     setDialogueToAdd('')
   }
 
-  // SceneDialogue の SE / キャラ位置 / 反転 を更新
+  // SceneDialogue の SE / キャラ位置 / 反転 / 間合い を更新
   function updateSceneDialogueMeta(
     sceneId: string,
     sdId: string,
     patch: Partial<
       Pick<
         SceneDialogue,
-        'se_id' | 'se_volume' | 'character_x' | 'character_scale' | 'character_flipped'
+        | 'se_id'
+        | 'se_volume'
+        | 'character_x'
+        | 'character_scale'
+        | 'character_flipped'
+        | 'pause_after_ms'
       >
     >,
   ) {
@@ -656,6 +738,8 @@ export default function StoryboardPage() {
               character_scale:
                 typeof rowPart.character_scale === 'number' ? rowPart.character_scale : 1.0,
               character_flipped: rowPart.character_flipped ?? false,
+              pause_after_ms:
+                typeof rowPart.pause_after_ms === 'number' ? rowPart.pause_after_ms : 0,
               created_at: rowPart.created_at,
             }
             saveSceneDialogue(row).catch((e) =>
@@ -1132,31 +1216,63 @@ export default function StoryboardPage() {
 
                               {/* ===== 登場キャラ(scene_cast) ===== */}
                               <div className="space-y-2">
-                                <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center justify-between gap-2 flex-wrap">
                                   <h5 className="font-medium text-foreground">登場キャラ</h5>
-                                  <select
-                                    value=""
-                                    onChange={(e) => {
-                                      if (e.target.value) {
-                                        handleAddCastMember(scene.id, e.target.value)
-                                        e.target.value = ''
-                                      }
-                                    }}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="px-2 py-1 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                                  >
-                                    <option value="">+ キャラ追加</option>
-                                    {characters
-                                      .filter(
-                                        (c) =>
-                                          !castForScene(scene.id).some((m) => m.character_id === c.id),
-                                      )
-                                      .map((c) => (
-                                        <option key={c.id} value={c.id}>
-                                          {c.name}
-                                        </option>
-                                      ))}
-                                  </select>
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    {castPresets.length > 0 && (
+                                      <select
+                                        value=""
+                                        onChange={(e) => {
+                                          if (e.target.value) {
+                                            handleApplyCastPreset(scene.id, e.target.value)
+                                            e.target.value = ''
+                                          }
+                                        }}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="px-2 py-1 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                        title="保存したプリセットを適用(現在のキャストは置き換え)"
+                                      >
+                                        <option value="">プリセット適用</option>
+                                        {castPresets.map((p) => (
+                                          <option key={p.id} value={p.id}>
+                                            {p.name} ({p.members.length}人)
+                                          </option>
+                                        ))}
+                                      </select>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveCastPreset(scene.id)}
+                                      disabled={castForScene(scene.id).length === 0}
+                                      className="px-2 py-1 text-xs rounded border border-input text-foreground hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                                      title="現在のキャストをプリセットとして保存"
+                                    >
+                                      プリセット保存
+                                    </button>
+                                    <select
+                                      value=""
+                                      onChange={(e) => {
+                                        if (e.target.value) {
+                                          handleAddCastMember(scene.id, e.target.value)
+                                          e.target.value = ''
+                                        }
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="px-2 py-1 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                    >
+                                      <option value="">+ キャラ追加</option>
+                                      {characters
+                                        .filter(
+                                          (c) =>
+                                            !castForScene(scene.id).some((m) => m.character_id === c.id),
+                                        )
+                                        .map((c) => (
+                                          <option key={c.id} value={c.id}>
+                                            {c.name}
+                                          </option>
+                                        ))}
+                                    </select>
+                                  </div>
                                 </div>
                                 {castForScene(scene.id).length === 0 ? (
                                   <p className="text-xs text-muted-foreground">
@@ -1330,6 +1446,13 @@ export default function StoryboardPage() {
                                           </div>
                                           <div className="flex items-center gap-1 flex-shrink-0">
                                             <button
+                                              onClick={() => setPreviewingSdId(sd.id)}
+                                              className="p-1 hover:bg-primary/20 rounded transition"
+                                              title="このセリフだけ再生"
+                                            >
+                                              <Play size={12} className="text-primary" />
+                                            </button>
+                                            <button
                                               onClick={() => handleDuplicateDialogue(scene.id, sd.id)}
                                               className="p-1 hover:bg-primary/20 rounded transition"
                                               title="このセリフを複製"
@@ -1470,6 +1593,28 @@ export default function StoryboardPage() {
                                           </button>
                                         </div>
                                         )}
+                                        {/* 間合い(このセリフを終えてから次へ進むまでの無音) */}
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-xs text-muted-foreground flex-shrink-0">
+                                            間合い
+                                          </span>
+                                          <input
+                                            type="range"
+                                            min={0}
+                                            max={3000}
+                                            step={100}
+                                            value={sd.pause_after_ms ?? 0}
+                                            onChange={(e) =>
+                                              updateSceneDialogueMeta(scene.id, sd.id, {
+                                                pause_after_ms: Number(e.target.value),
+                                              })
+                                            }
+                                            className="flex-1 accent-primary"
+                                          />
+                                          <span className="text-xs text-muted-foreground tabular-nums w-12 text-right">
+                                            {((sd.pause_after_ms ?? 0) / 1000).toFixed(1)}秒
+                                          </span>
+                                        </div>
                                       </div>
                                     )
                                   })}
@@ -1681,6 +1826,35 @@ export default function StoryboardPage() {
               sceneCast={playScene ? castForScene(playScene.id) : []}
               onClose={() => setPlayingSceneId(null)}
             />
+            {/* セリフ単体プレビュー: previewingSdId を含むシーンを対象に1セリフだけ再生 */}
+            {(() => {
+              const previewScene = previewingSdId
+                ? scenes.find((s) => s.dialogues.some((d) => d.id === previewingSdId)) ?? null
+                : null
+              return (
+                <ScenePlayerDialog
+                  scene={previewScene}
+                  characters={characters}
+                  audioFiles={audioFiles}
+                  expressions={expressions}
+                  backgroundLayers={
+                    previewScene ? backgroundLayersForScene(previewScene) : []
+                  }
+                  bgmTrack={previewScene ? bgmForScene(previewScene) : null}
+                  bgmVolume={
+                    previewScene && typeof previewScene.bgm_volume === 'number'
+                      ? previewScene.bgm_volume
+                      : 0.25
+                  }
+                  sounds={sounds}
+                  telopStyle={telopStyle}
+                  sceneCast={previewScene ? castForScene(previewScene.id) : []}
+                  startAtSdId={previewingSdId}
+                  singleMode
+                  onClose={() => setPreviewingSdId(null)}
+                />
+              )
+            })()}
             <SceneExportDialog
               scene={exportScene}
               characters={characters}
@@ -1734,6 +1908,7 @@ export default function StoryboardPage() {
 // ==================== シーン再生ダイアログ ====================
 
 interface SceneDialogueResolved {
+  sdId: string
   text: string
   character: Character | null
   audio: AudioFile | null
@@ -1747,6 +1922,8 @@ interface SceneDialogueResolved {
   extras: StageExtraResolved[]
   // ナレーション(無音)用の表示時間 ms。audio がある場合は無視される
   silentDurationMs: number
+  // 次のセリフに進む前の間合い(ms)
+  pauseAfterMs: number
 }
 
 interface StageExtraResolved {
@@ -1769,6 +1946,8 @@ function ScenePlayerDialog({
   sounds,
   telopStyle,
   sceneCast,
+  startAtSdId,
+  singleMode,
   onClose,
 }: {
   scene: SceneWithDialogues | null
@@ -1781,12 +1960,15 @@ function ScenePlayerDialog({
   sounds: SoundEffect[]
   telopStyle: TelopStyle
   sceneCast: SceneCastMember[]
+  startAtSdId?: string | null // この SceneDialogue から再生を開始
+  singleMode?: boolean // true のとき 1 セリフだけ再生して停止(プレビュー用)
   onClose: () => void
 }) {
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const bgmRef = useRef<HTMLAudioElement | null>(null)
   const seRef = useRef<HTMLAudioElement | null>(null)
+  const pauseTimerRef = useRef<number | null>(null)
 
   // scene が変わったらリセット
   useEffect(() => {
@@ -1865,7 +2047,10 @@ function ScenePlayerDialog({
         .filter((x): x is StageExtraResolved => x !== null)
       const silentDurationMs =
         typeof d.duration_ms === 'number' && d.duration_ms > 0 ? d.duration_ms : 3000
+      const pauseAfterMs =
+        typeof sd.pause_after_ms === 'number' && sd.pause_after_ms > 0 ? sd.pause_after_ms : 0
       return {
+        sdId: sd.id,
         text: d.text,
         character,
         audio,
@@ -1878,6 +2063,7 @@ function ScenePlayerDialog({
         characterFlipped,
         extras,
         silentDurationMs,
+        pauseAfterMs,
       } satisfies SceneDialogueResolved
     })
     // 採用ルール: (キャラ+音声) or (テキストあり= ナレーション)
@@ -1892,12 +2078,49 @@ function ScenePlayerDialog({
   const hasNext = index + 1 < queue.length
 
   function handleEnded() {
-    if (hasNext) {
-      setIndex((i) => i + 1)
+    const gap = current?.pauseAfterMs ?? 0
+    if (singleMode || !hasNext) {
+      // 最後 or 1セリフモードは停止
+      if (gap > 0 && !singleMode) {
+        pauseTimerRef.current = window.setTimeout(() => setPlaying(false), gap)
+      } else {
+        setPlaying(false)
+      }
+      return
+    }
+    if (gap > 0) {
+      pauseTimerRef.current = window.setTimeout(() => setIndex((i) => i + 1), gap)
     } else {
-      setPlaying(false)
+      setIndex((i) => i + 1)
     }
   }
+
+  // 再生停止時/アンマウント時に pauseTimer を掃除
+  useEffect(() => {
+    return () => {
+      if (pauseTimerRef.current !== null) {
+        window.clearTimeout(pauseTimerRef.current)
+        pauseTimerRef.current = null
+      }
+    }
+  }, [])
+  useEffect(() => {
+    if (!playing && pauseTimerRef.current !== null) {
+      window.clearTimeout(pauseTimerRef.current)
+      pauseTimerRef.current = null
+    }
+  }, [playing])
+
+  // startAtSdId が指定されたら該当 index に合わせて自動再生開始
+  useEffect(() => {
+    if (!startAtSdId || queue.length === 0) return
+    const idx = queue.findIndex((q) => q.sdId === startAtSdId)
+    if (idx >= 0) {
+      setIndex(idx)
+      setPlaying(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startAtSdId, scene?.id])
 
   function handleSkip() {
     if (hasNext) {

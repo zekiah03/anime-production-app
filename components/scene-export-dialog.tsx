@@ -70,6 +70,7 @@ interface ResolvedDialogue {
   characterFlipped: boolean
   extras: ExportExtra[]
   silentDurationMs: number
+  pauseAfterMs: number
 }
 
 const LIPSYNC_THRESHOLD = 40
@@ -187,6 +188,10 @@ export function SceneExportDialog({
             .filter((x): x is ExportExtra => x !== null)
           const silentDurationMs =
             typeof d.duration_ms === 'number' && d.duration_ms > 0 ? d.duration_ms : 3000
+          const pauseAfterMs =
+            typeof sd.pause_after_ms === 'number' && sd.pause_after_ms > 0
+              ? sd.pause_after_ms
+              : 0
           return {
             text: d.text,
             character,
@@ -204,6 +209,7 @@ export function SceneExportDialog({
             characterFlipped,
             extras,
             silentDurationMs,
+            pauseAfterMs,
           } as ResolvedDialogue
         })
         .filter((x): x is ResolvedDialogue => x !== null)
@@ -650,6 +656,25 @@ export function SceneExportDialog({
           seEl.src = ''
         }
         if (audioEl) audioEl.src = ''
+
+        // 間合い(次のセリフまで無音で待つ)。描画だけ回しておく
+        if (current.pauseAfterMs > 0 && !cancelledRef.current) {
+          const pauseEnd = performance.now() + current.pauseAfterMs
+          await new Promise<void>((resolve) => {
+            let r: number | null = null
+            const tick = (now: number) => {
+              if (cancelledRef.current || now >= pauseEnd) {
+                resolve()
+                return
+              }
+              // このセリフの最終状態(口閉じ)のフレームを描画し続ける
+              drawFrame(ctx, current, imageCache, false, false, current.silentDurationMs + 99999)
+              r = requestAnimationFrame(tick)
+            }
+            r = requestAnimationFrame(tick)
+            void r
+          })
+        }
       }
 
       // BGMを止めて recorder 停止

@@ -95,6 +95,7 @@ interface ResolvedDialogue {
   characterFlipped: boolean
   extras: ExportExtra[]
   silentDurationMs: number
+  pauseAfterMs: number
 }
 
 export function VideoExportDialog({
@@ -216,6 +217,10 @@ export function VideoExportDialog({
             .filter((x): x is ExportExtra => x !== null)
           const silentDurationMs =
             typeof d.duration_ms === 'number' && d.duration_ms > 0 ? d.duration_ms : 3000
+          const pauseAfterMs =
+            typeof sd.pause_after_ms === 'number' && sd.pause_after_ms > 0
+              ? sd.pause_after_ms
+              : 0
           return {
             text: d.text,
             character,
@@ -233,6 +238,7 @@ export function VideoExportDialog({
             characterFlipped,
             extras,
             silentDurationMs,
+            pauseAfterMs,
           } as ResolvedDialogue
         })
         .filter((x): x is ResolvedDialogue => x !== null)
@@ -682,6 +688,32 @@ export function VideoExportDialog({
             seEl.src = ''
           }
           if (audioEl) audioEl.src = ''
+
+          // 間合い(次のセリフまで無音で待つ)
+          if (current.pauseAfterMs > 0 && !cancelledRef.current) {
+            const pauseEnd = performance.now() + current.pauseAfterMs
+            await new Promise<void>((resolve) => {
+              let r: number | null = null
+              const tick = (now: number) => {
+                if (cancelledRef.current || now >= pauseEnd) {
+                  resolve()
+                  return
+                }
+                drawFrame(
+                  ctx,
+                  current,
+                  seg.backgroundLayers,
+                  imageCache,
+                  false,
+                  false,
+                  current.silentDurationMs + 99999,
+                )
+                r = requestAnimationFrame(tick)
+              }
+              r = requestAnimationFrame(tick)
+              void r
+            })
+          }
         }
 
         // シーンを終える: BGM を止める
