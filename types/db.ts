@@ -38,6 +38,7 @@ export interface Dialogue {
   text: string
   character_id: string | null
   audio_id: string | null
+  expression_id: string | null // プレビュー時の表情指定
   emotion: string | null
   notes: string | null
   created_at: string

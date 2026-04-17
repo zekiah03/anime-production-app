@@ -5,37 +5,43 @@ import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Music, Users, MessageSquare, Film, Plus, Trash2, Edit2, Play, Layers } from 'lucide-react'
-import type { Dialogue, Character, AudioFile } from '@/types/db'
+import { Music, Users, MessageSquare, Film, Plus, Trash2, Edit2, Play, Square, Layers, Sparkles } from 'lucide-react'
+import type { Dialogue, Character, AudioFile, CharacterExpression } from '@/types/db'
 import {
   deleteDialogue,
   getAllAudioFiles,
   getAllCharacters,
   getAllDialogues,
+  getAllExpressions,
   saveDialogue,
 } from '@/lib/db'
+import { LipSyncStage } from '@/components/lip-sync-stage'
 
 export default function DialoguesPage() {
   const [dialogues, setDialogues] = useState<Dialogue[]>([])
   const [characters, setCharacters] = useState<Character[]>([])
   const [audioFiles, setAudioFiles] = useState<AudioFile[]>([])
+  const [expressions, setExpressions] = useState<CharacterExpression[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [playingDialogueId, setPlayingDialogueId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     text: '',
     character_id: '',
     audio_id: '',
+    expression_id: '',
     emotion: '',
     notes: '',
   })
 
   useEffect(() => {
-    Promise.all([getAllDialogues(), getAllCharacters(), getAllAudioFiles()])
-      .then(([d, c, a]) => {
+    Promise.all([getAllDialogues(), getAllCharacters(), getAllAudioFiles(), getAllExpressions()])
+      .then(([d, c, a, e]) => {
         setDialogues(d)
         setCharacters(c)
         setAudioFiles(a)
+        setExpressions(e)
       })
       .catch((e) => console.error('[anime-app] load dialogues page failed', e))
       .finally(() => setLoading(false))
@@ -55,6 +61,7 @@ export default function DialoguesPage() {
         text: formData.text,
         character_id: formData.character_id || null,
         audio_id: formData.audio_id || null,
+        expression_id: formData.expression_id || null,
         emotion: formData.emotion || null,
         notes: formData.notes || null,
         updated_at: now,
@@ -68,6 +75,7 @@ export default function DialoguesPage() {
         text: formData.text,
         character_id: formData.character_id || null,
         audio_id: formData.audio_id || null,
+        expression_id: formData.expression_id || null,
         emotion: formData.emotion || null,
         notes: formData.notes || null,
         created_at: now,
@@ -91,6 +99,7 @@ export default function DialoguesPage() {
       text: dialogue.text,
       character_id: dialogue.character_id || '',
       audio_id: dialogue.audio_id || '',
+      expression_id: dialogue.expression_id || '',
       emotion: dialogue.emotion || '',
       notes: dialogue.notes || '',
     })
@@ -103,6 +112,7 @@ export default function DialoguesPage() {
       text: '',
       character_id: '',
       audio_id: '',
+      expression_id: '',
       emotion: '',
       notes: '',
     })
@@ -217,6 +227,27 @@ export default function DialoguesPage() {
                     </select>
                   </div>
                   <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">表情</label>
+                    <select
+                      value={formData.expression_id}
+                      onChange={(e) => setFormData({ ...formData, expression_id: e.target.value })}
+                      disabled={!formData.character_id}
+                      className="w-full px-3 py-2 bg-background border border-input rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+                    >
+                      <option value="">自動(口パク優先)</option>
+                      {expressions
+                        .filter((x) => x.character_id === formData.character_id && x.kind === 'expression')
+                        .map((x) => (
+                          <option key={x.id} value={x.id}>
+                            {x.name}
+                          </option>
+                        ))}
+                    </select>
+                    {!formData.character_id && (
+                      <p className="text-xs text-muted-foreground mt-1">先にキャラクターを選択してください</p>
+                    )}
+                  </div>
+                  <div>
                     <label className="block text-sm font-medium text-foreground mb-1">感情</label>
                     <select
                       value={formData.emotion}
@@ -270,54 +301,97 @@ export default function DialoguesPage() {
             </Card>
           ) : (
             <div className="space-y-3">
-              {dialogues.map((dialogue) => (
-                <Card key={dialogue.id} className="bg-card border-border p-4 hover:border-primary/50 transition">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-2">
-                        <p className="font-medium text-foreground break-words">{dialogue.text}</p>
-                        {dialogue.audio_id && (
-                          <button className="flex-shrink-0 p-1 hover:bg-primary/20 rounded transition">
-                            <Play size={16} className="text-primary" />
-                          </button>
+              {dialogues.map((dialogue) => {
+                const character = characters.find((c) => c.id === dialogue.character_id) ?? null
+                const audio = audioFiles.find((a) => a.id === dialogue.audio_id) ?? null
+                const charExpressions = character
+                  ? expressions.filter((x) => x.character_id === character.id)
+                  : []
+                const expressionName = dialogue.expression_id
+                  ? expressions.find((x) => x.id === dialogue.expression_id)?.name
+                  : null
+                const canPreview = !!character && !!audio
+                const isPlaying = playingDialogueId === dialogue.id
+                return (
+                  <Card key={dialogue.id} className="bg-card border-border p-4 hover:border-primary/50 transition">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-2">
+                          <p className="font-medium text-foreground break-words">{dialogue.text}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2 text-sm">
+                          {character && (
+                            <span className="px-2 py-1 bg-primary/20 text-primary rounded">
+                              {character.name}
+                            </span>
+                          )}
+                          {dialogue.emotion && (
+                            <span className="px-2 py-1 bg-accent/20 text-accent rounded">
+                              {dialogue.emotion}
+                            </span>
+                          )}
+                          {expressionName && (
+                            <span className="px-2 py-1 bg-muted text-muted-foreground rounded inline-flex items-center gap-1">
+                              <Sparkles size={12} /> {expressionName}
+                            </span>
+                          )}
+                          {audio && (
+                            <span className="px-2 py-1 bg-muted text-muted-foreground rounded inline-flex items-center gap-1">
+                              <Music size={12} /> {audio.name}
+                            </span>
+                          )}
+                        </div>
+                        {dialogue.notes && (
+                          <p className="text-sm text-muted-foreground mt-2">メモ: {dialogue.notes}</p>
                         )}
+                        <p className="text-xs text-muted-foreground mt-2">
+                          {new Date(dialogue.created_at).toLocaleDateString('ja-JP')}
+                        </p>
                       </div>
-                      <div className="flex flex-wrap gap-2 text-sm">
-                        {dialogue.character_id && (
-                          <span className="px-2 py-1 bg-primary/20 text-primary rounded">
-                            {characters.find((c) => c.id === dialogue.character_id)?.name}
-                          </span>
-                        )}
-                        {dialogue.emotion && (
-                          <span className="px-2 py-1 bg-accent/20 text-accent rounded">
-                            {dialogue.emotion}
-                          </span>
-                        )}
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => {
+                            if (!canPreview) return
+                            setPlayingDialogueId(isPlaying ? null : dialogue.id)
+                          }}
+                          disabled={!canPreview}
+                          className="p-2 hover:bg-primary/20 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
+                          aria-label="プレビュー"
+                          title={canPreview ? 'プレビュー' : 'キャラと音声の両方が必要です'}
+                        >
+                          {isPlaying ? <Square size={16} className="text-primary" /> : <Play size={16} className="text-primary" />}
+                        </button>
+                        <button
+                          onClick={() => handleEdit(dialogue)}
+                          className="p-2 hover:bg-primary/20 rounded-lg transition"
+                        >
+                          <Edit2 size={16} className="text-primary" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(dialogue.id)}
+                          className="p-2 hover:bg-destructive/20 rounded-lg transition"
+                        >
+                          <Trash2 size={16} className="text-destructive" />
+                        </button>
                       </div>
-                      {dialogue.notes && (
-                        <p className="text-sm text-muted-foreground mt-2">メモ: {dialogue.notes}</p>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-2">
-                        {new Date(dialogue.created_at).toLocaleDateString('ja-JP')}
-                      </p>
                     </div>
-                    <div className="flex gap-2 flex-shrink-0">
-                      <button
-                        onClick={() => handleEdit(dialogue)}
-                        className="p-2 hover:bg-primary/20 rounded-lg transition"
-                      >
-                        <Edit2 size={16} className="text-primary" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(dialogue.id)}
-                        className="p-2 hover:bg-destructive/20 rounded-lg transition"
-                      >
-                        <Trash2 size={16} className="text-destructive" />
-                      </button>
-                    </div>
-                  </div>
-                </Card>
-              ))}
+                    {isPlaying && character && (
+                      <div className="mt-4 pt-4 border-t border-border">
+                        <div className="max-w-[200px]">
+                          <LipSyncStage
+                            character={character}
+                            expressions={charExpressions}
+                            audioUrl={audio?.file_url ?? null}
+                            overrideExpressionId={dialogue.expression_id}
+                            playing={isPlaying}
+                            onEnded={() => setPlayingDialogueId(null)}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </Card>
+                )
+              })}
             </div>
           )}
         </div>

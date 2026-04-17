@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -37,6 +37,7 @@ import {
   saveCharacter,
   saveExpression,
 } from '@/lib/db'
+import { LipSyncStage } from '@/components/lip-sync-stage'
 
 const KIND_LABEL: Record<ExpressionKind, string> = {
   mouth_closed: '口閉じ',
@@ -503,94 +504,11 @@ function LipSyncPreview({
   const [selectedAudioId, setSelectedAudioId] = useState<string>('')
   const [selectedExpressionId, setSelectedExpressionId] = useState<string>('')
   const [playing, setPlaying] = useState(false)
-  const [mouthOpen, setMouthOpen] = useState(false)
-  const [threshold, setThreshold] = useState(40) // 0..255 相当
-
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const audioCtxRef = useRef<AudioContext | null>(null)
-  const analyserRef = useRef<AnalyserNode | null>(null)
-  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null)
-  const rafRef = useRef<number | null>(null)
-  const lastTickRef = useRef<number>(0)
+  const [threshold, setThreshold] = useState(40)
 
   const mouthClosed = expressions.find((e) => e.kind === 'mouth_closed')
   const mouthOpenExpr = expressions.find((e) => e.kind === 'mouth_open')
-  const selectedExpression = expressions.find((e) => e.id === selectedExpressionId)
-
-  // 表示する画像を決定: 表情バリエーション選択中 → それを優先。それ以外は口パクで切替。
-  function pickImage(): string | null {
-    if (selectedExpression) return selectedExpression.image_url
-    if (mouthOpen && mouthOpenExpr) return mouthOpenExpr.image_url
-    if (mouthClosed) return mouthClosed.image_url
-    return character.image_url
-  }
-
-  useEffect(() => {
-    return () => {
-      stopLipSync()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  function stopLipSync() {
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current)
-      rafRef.current = null
-    }
-    if (audioRef.current) {
-      audioRef.current.pause()
-      audioRef.current.currentTime = 0
-    }
-    setPlaying(false)
-    setMouthOpen(false)
-  }
-
-  async function startLipSync() {
-    const audio = audioFiles.find((a) => a.id === selectedAudioId)
-    if (!audio || !audioRef.current) return
-
-    // AudioContext は遅延初期化(ブラウザポリシー対応)
-    if (!audioCtxRef.current) {
-      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-      audioCtxRef.current = new Ctx()
-    }
-    const ctx = audioCtxRef.current
-    if (ctx.state === 'suspended') await ctx.resume()
-
-    if (!sourceRef.current) {
-      sourceRef.current = ctx.createMediaElementSource(audioRef.current)
-      analyserRef.current = ctx.createAnalyser()
-      analyserRef.current.fftSize = 512
-      sourceRef.current.connect(analyserRef.current)
-      analyserRef.current.connect(ctx.destination)
-    }
-
-    const analyser = analyserRef.current!
-    const data = new Uint8Array(analyser.frequencyBinCount)
-
-    audioRef.current.currentTime = 0
-    await audioRef.current.play()
-    setPlaying(true)
-
-    // 100ms 間隔で音量チェック → パッと切替(コミカル感)
-    const TICK_MS = 100
-    lastTickRef.current = performance.now()
-    const tick = (now: number) => {
-      if (!analyserRef.current) return
-      if (now - lastTickRef.current >= TICK_MS) {
-        analyser.getByteFrequencyData(data)
-        let sum = 0
-        for (let i = 0; i < data.length; i++) sum += data[i]
-        const avg = sum / data.length
-        setMouthOpen(avg > threshold)
-        lastTickRef.current = now
-      }
-      rafRef.current = requestAnimationFrame(tick)
-    }
-    rafRef.current = requestAnimationFrame(tick)
-  }
-
-  const displayImage = pickImage()
+  const audioUrl = audioFiles.find((a) => a.id === selectedAudioId)?.file_url ?? null
 
   return (
     <div className="border border-border rounded-lg p-4 bg-muted/30">
@@ -599,30 +517,25 @@ function LipSyncPreview({
       </h4>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="flex items-center justify-center bg-background rounded-md border border-border aspect-square overflow-hidden">
-          {displayImage ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={displayImage}
-              src={displayImage}
-              alt={character.name}
-              className="w-full h-full object-contain"
-              style={{ imageRendering: 'auto' }}
-            />
-          ) : (
-            <div className="text-center text-muted-foreground p-4">
-              <Users size={32} className="mx-auto mb-2" />
-              <p className="text-xs">画像を登録してください</p>
-            </div>
-          )}
-        </div>
+        <LipSyncStage
+          character={character}
+          expressions={expressions}
+          audioUrl={audioUrl}
+          overrideExpressionId={selectedExpressionId || null}
+          threshold={threshold}
+          playing={playing}
+          onEnded={() => setPlaying(false)}
+        />
 
         <div className="space-y-3">
           <div>
             <label className="block text-sm font-medium text-foreground mb-1">音声を選択</label>
             <select
               value={selectedAudioId}
-              onChange={(e) => setSelectedAudioId(e.target.value)}
+              onChange={(e) => {
+                setSelectedAudioId(e.target.value)
+                setPlaying(false)
+              }}
               className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm"
             >
               <option value="">このキャラの音声から選ぶ</option>
@@ -666,11 +579,16 @@ function LipSyncPreview({
 
           <div className="flex gap-2">
             {!playing ? (
-              <Button size="sm" onClick={startLipSync} disabled={!selectedAudioId || !mouthOpenExpr || !mouthClosed} className="gap-1">
+              <Button
+                size="sm"
+                onClick={() => setPlaying(true)}
+                disabled={!selectedAudioId || !mouthOpenExpr || !mouthClosed}
+                className="gap-1"
+              >
                 <Play size={14} /> 再生
               </Button>
             ) : (
-              <Button size="sm" variant="outline" onClick={stopLipSync} className="gap-1">
+              <Button size="sm" variant="outline" onClick={() => setPlaying(false)} className="gap-1">
                 <Square size={14} /> 停止
               </Button>
             )}
@@ -681,8 +599,6 @@ function LipSyncPreview({
               リップシンクには「口開け」「口閉じ」の画像を両方登録してください
             </p>
           )}
-
-          <audio ref={audioRef} src={audioFiles.find((a) => a.id === selectedAudioId)?.file_url} onEnded={stopLipSync} />
         </div>
       </div>
     </div>

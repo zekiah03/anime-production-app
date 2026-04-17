@@ -5,22 +5,36 @@ import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Music, Users, MessageSquare, Film, Plus, Trash2, Edit2, GripVertical, Layers } from 'lucide-react'
-import type { Scene, Dialogue, SceneWithDialogues } from '@/types/db'
+import { Music, Users, MessageSquare, Film, Plus, Trash2, Edit2, GripVertical, Layers, Play, Square, SkipForward } from 'lucide-react'
+import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression } from '@/types/db'
 import {
   deleteScene,
   deleteSceneDialogue,
+  getAllAudioFiles,
+  getAllCharacters,
   getAllDialogues,
+  getAllExpressions,
   getAllSceneDialogues,
   getAllScenes,
   saveScene,
   saveSceneDialogue,
   saveScenesBatch,
 } from '@/lib/db'
+import { LipSyncStage } from '@/components/lip-sync-stage'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 export default function StoryboardPage() {
   const [scenes, setScenes] = useState<SceneWithDialogues[]>([])
   const [dialogues, setDialogues] = useState<Dialogue[]>([])
+  const [characters, setCharacters] = useState<Character[]>([])
+  const [audioFiles, setAudioFiles] = useState<AudioFile[]>([])
+  const [expressions, setExpressions] = useState<CharacterExpression[]>([])
   const [loading, setLoading] = useState(true)
   const [showSceneForm, setShowSceneForm] = useState(false)
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null)
@@ -28,6 +42,7 @@ export default function StoryboardPage() {
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
   const [dialogueToAdd, setDialogueToAdd] = useState('')
   const [draggedSceneId, setDraggedSceneId] = useState<string | null>(null)
+  const [playingSceneId, setPlayingSceneId] = useState<string | null>(null)
 
   useEffect(() => {
     loadAll()
@@ -35,10 +50,13 @@ export default function StoryboardPage() {
 
   async function loadAll() {
     try {
-      const [rawScenes, sceneDialogues, allDialogues] = await Promise.all([
+      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions] = await Promise.all([
         getAllScenes(),
         getAllSceneDialogues(),
         getAllDialogues(),
+        getAllCharacters(),
+        getAllAudioFiles(),
+        getAllExpressions(),
       ])
       const dialogueById = new Map(allDialogues.map((d) => [d.id, d]))
       const combined: SceneWithDialogues[] = rawScenes.map((scene) => ({
@@ -50,6 +68,9 @@ export default function StoryboardPage() {
       }))
       setScenes(combined)
       setDialogues(allDialogues)
+      setCharacters(allCharacters)
+      setAudioFiles(allAudio)
+      setExpressions(allExpressions)
     } catch (e) {
       console.error('[anime-app] load storyboard failed', e)
     } finally {
@@ -378,6 +399,17 @@ export default function StoryboardPage() {
                         </div>
                         <div className="flex gap-2 flex-shrink-0">
                           <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setPlayingSceneId(scene.id)
+                            }}
+                            disabled={(scene.dialogues?.length ?? 0) === 0}
+                            className="p-2 hover:bg-primary/20 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="シーン再生"
+                          >
+                            <Play size={16} className="text-primary" />
+                          </button>
+                          <button
                             onClick={() => handleEditScene(scene)}
                             className="p-2 hover:bg-primary/20 rounded-lg transition"
                           >
@@ -426,6 +458,176 @@ export default function StoryboardPage() {
           </div>
         </div>
       </main>
+
+      <ScenePlayerDialog
+        scene={playingSceneId ? scenes.find((s) => s.id === playingSceneId) ?? null : null}
+        characters={characters}
+        audioFiles={audioFiles}
+        expressions={expressions}
+        onClose={() => setPlayingSceneId(null)}
+      />
     </div>
+  )
+}
+
+// ==================== シーン再生ダイアログ ====================
+
+interface SceneDialogueResolved {
+  text: string
+  character: Character | null
+  audio: AudioFile | null
+  expressionId: string | null
+  charExpressions: CharacterExpression[]
+}
+
+function ScenePlayerDialog({
+  scene,
+  characters,
+  audioFiles,
+  expressions,
+  onClose,
+}: {
+  scene: SceneWithDialogues | null
+  characters: Character[]
+  audioFiles: AudioFile[]
+  expressions: CharacterExpression[]
+  onClose: () => void
+}) {
+  const [index, setIndex] = useState(0)
+  const [playing, setPlaying] = useState(false)
+
+  // scene が変わったらリセット
+  useEffect(() => {
+    setIndex(0)
+    setPlaying(false)
+  }, [scene?.id])
+
+  if (!scene) return null
+
+  // 音声のあるセリフだけを再生対象にする
+  const queue: SceneDialogueResolved[] = scene.dialogues
+    .map((sd) => {
+      const d = sd.dialogue
+      if (!d) return null
+      const character = characters.find((c) => c.id === d.character_id) ?? null
+      const audio = audioFiles.find((a) => a.id === d.audio_id) ?? null
+      const charExpressions = character
+        ? expressions.filter((x) => x.character_id === character.id)
+        : []
+      return {
+        text: d.text,
+        character,
+        audio,
+        expressionId: d.expression_id,
+        charExpressions,
+      } satisfies SceneDialogueResolved
+    })
+    .filter((x): x is SceneDialogueResolved => x !== null && x.audio !== null && x.character !== null)
+
+  const current = queue[index] ?? null
+  const hasNext = index + 1 < queue.length
+
+  function handleEnded() {
+    if (hasNext) {
+      setIndex((i) => i + 1)
+    } else {
+      setPlaying(false)
+    }
+  }
+
+  function handleSkip() {
+    if (hasNext) {
+      setIndex((i) => i + 1)
+    } else {
+      setPlaying(false)
+    }
+  }
+
+  function handleStart() {
+    setIndex(0)
+    setPlaying(true)
+  }
+
+  return (
+    <Dialog open={!!scene} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{scene.title} を再生</DialogTitle>
+          <DialogDescription>
+            キャラと音声が設定されたセリフを順番に再生します(
+            {queue.length} / {scene.dialogues.length} 件が対象)
+          </DialogDescription>
+        </DialogHeader>
+
+        {queue.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">
+            再生できるセリフがありません。セリフにキャラクターと音声を紐付けてください
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <LipSyncStage
+                character={current?.character ?? null}
+                expressions={current?.charExpressions ?? []}
+                audioUrl={current?.audio?.file_url ?? null}
+                overrideExpressionId={current?.expressionId ?? null}
+                playing={playing}
+                onEnded={handleEnded}
+              />
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs text-muted-foreground">現在のセリフ</p>
+                  <p className="text-base font-medium text-foreground mt-1">
+                    {current?.text ?? '-'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">キャラクター</p>
+                  <p className="text-sm text-foreground">{current?.character?.name ?? '-'}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">進行</p>
+                  <p className="text-sm text-foreground">
+                    {index + 1} / {queue.length}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              {!playing ? (
+                <Button size="sm" onClick={handleStart} className="gap-1">
+                  <Play size={14} /> 最初から再生
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => setPlaying(false)} className="gap-1">
+                  <Square size={14} /> 停止
+                </Button>
+              )}
+              <Button size="sm" variant="outline" onClick={handleSkip} disabled={!playing} className="gap-1">
+                <SkipForward size={14} /> 次へ
+              </Button>
+            </div>
+
+            {/* セリフ一覧(プレビュー) */}
+            <div className="border-t border-border pt-3">
+              <p className="text-xs text-muted-foreground mb-2">再生キュー</p>
+              <ol className="space-y-1 text-sm">
+                {queue.map((q, i) => (
+                  <li
+                    key={i}
+                    className={`px-2 py-1 rounded ${
+                      i === index ? 'bg-primary/20 text-primary font-medium' : 'text-muted-foreground'
+                    }`}
+                  >
+                    {i + 1}. {q.character?.name}: {q.text}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -166,6 +166,14 @@ export async function getExpressionsByCharacter(
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
 }
 
+export async function getAllExpressions(): Promise<CharacterExpression[]> {
+  const db = await getDB()
+  const all = await db.getAll('character_expressions')
+  return all
+    .map(hydrateExpression)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+}
+
 export async function saveExpression(expr: CharacterExpression): Promise<void> {
   if (!expr.image_blob) throw new Error('image_blob is required')
   const db = await getDB()
