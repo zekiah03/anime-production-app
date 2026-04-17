@@ -118,6 +118,37 @@ export type SceneColorTag =
   | 'purple'
   | 'gray'
 
+// AI 設定(ローカル端末にのみ保存される。外部に送信されることはないが、
+// API 呼び出し時はそのプロバイダへ送られる)
+export type AiProvider = 'openai' | 'anthropic' | 'gemini'
+
+export interface AiSettings {
+  provider: AiProvider
+  // プロバイダごとに鍵を保持(切替時にいちいち再入力しなくて済むように)
+  apiKeys: {
+    openai?: string
+    anthropic?: string
+    gemini?: string
+  }
+  // モデル名。プロバイダごとに自由なので string で持つ
+  model: string
+  // 最大応答トークン。プロバイダによって意味は若干違うが、超上限ガード用
+  maxTokens?: number
+  // 0..2。生成の多様性
+  temperature?: number
+  // 有効/無効の全体スイッチ(OFF にすると UI から AI ボタンが消える)
+  enabled: boolean
+}
+
+export const DEFAULT_AI_SETTINGS: AiSettings = {
+  provider: 'openai',
+  apiKeys: {},
+  model: 'gpt-4o-mini',
+  maxTokens: 1024,
+  temperature: 0.7,
+  enabled: false,
+}
+
 // シーンの入れ物。複数本の動画をこのアプリ1つで作り分けるために使う。
 export interface Video {
   id: string

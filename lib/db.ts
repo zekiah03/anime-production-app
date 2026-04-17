@@ -4,6 +4,7 @@
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type {
+  AiSettings,
   Character,
   CharacterExpression,
   AudioFile,
@@ -19,7 +20,7 @@ import type {
   TelopStyle,
   Video,
 } from '@/types/db'
-import { DEFAULT_TELOP_STYLE } from '@/types/db'
+import { DEFAULT_AI_SETTINGS, DEFAULT_TELOP_STYLE } from '@/types/db'
 
 const DB_NAME = 'anime-production'
 const DB_VERSION = 8
@@ -63,8 +64,13 @@ interface AnimeDB extends DBSchema {
   }
   bgm_tracks: { key: string; value: StoredBgmTrack }
   sound_effects: { key: string; value: StoredSoundEffect }
-  // settings: id をキーにした singleton。今は 'telop' のみ
-  settings: { key: string; value: { id: string; telop_style?: TelopStyle } }
+  // settings: id をキーにした singleton。'telop' / 'ai' など設定ごとにレコードを分ける
+  settings: {
+    key: string
+    value:
+      | { id: 'telop'; telop_style?: TelopStyle }
+      | { id: 'ai'; ai_settings?: AiSettings }
+  }
   // シーンの登場キャラ(複数キャラを同時配置)
   scene_cast: {
     key: string
@@ -579,6 +585,18 @@ export async function getTelopStyle(): Promise<TelopStyle> {
 export async function saveTelopStyle(style: TelopStyle): Promise<void> {
   const db = await getDB()
   await db.put('settings', { id: 'telop', telop_style: style })
+}
+
+export async function getAiSettings(): Promise<AiSettings> {
+  const db = await getDB()
+  const row = await db.get('settings', 'ai')
+  if (!row || row.id !== 'ai') return DEFAULT_AI_SETTINGS
+  return row.ai_settings ?? DEFAULT_AI_SETTINGS
+}
+
+export async function saveAiSettings(s: AiSettings): Promise<void> {
+  const db = await getDB()
+  await db.put('settings', { id: 'ai', ai_settings: s })
 }
 
 // ==================== Raw access (for export/import) ====================

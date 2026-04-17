@@ -2,13 +2,14 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Users, Film, Mountain } from 'lucide-react'
+import { Users, Film, Mountain, Settings } from 'lucide-react'
 
 const NAV = [
   { href: '/', label: 'ダッシュボード', icon: Film },
   { href: '/characters', label: 'キャラクター', icon: Users },
   { href: '/environment', label: '環境', icon: Mountain },
   { href: '/storyboard', label: 'ストーリーボード', icon: Film },
+  { href: '/settings', label: '設定', icon: Settings },
 ] as const
 
 export function Sidebar() {

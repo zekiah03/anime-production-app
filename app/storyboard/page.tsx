@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -4043,6 +4044,14 @@ export default function StoryboardPage() {
                           >
                             <Copy size={16} className="text-primary" />
                           </button>
+                          <Link
+                            href={`/storyboard/scene/${scene.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="p-2 hover:bg-primary/20 rounded-lg transition inline-flex items-center"
+                            title="シーンを広い画面で詳細編集"
+                          >
+                            <Maximize2 size={16} className="text-primary" />
+                          </Link>
                           <select
                             value={scene.video_id ?? ''}
                             onClick={(e) => e.stopPropagation()}
