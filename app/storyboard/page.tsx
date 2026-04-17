@@ -101,6 +101,7 @@ export default function StoryboardPage() {
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const [telopStyle, setTelopStyle] = useState<TelopStyle>(DEFAULT_TELOP_STYLE)
   const [showTelopSettings, setShowTelopSettings] = useState(false)
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false)
   // ナレーション追加フォーム(展開中のシーンに対して使う)
   const [narrationText, setNarrationText] = useState('')
   const [narrationAudioId, setNarrationAudioId] = useState('')
@@ -810,6 +811,11 @@ export default function StoryboardPage() {
         }
         return
       }
+      if (e.key === '?') {
+        e.preventDefault()
+        setShowShortcutsHelp((v) => !v)
+        return
+      }
       if (e.key === '/') {
         e.preventDefault()
         searchInputRef.current?.focus()
@@ -1144,6 +1150,14 @@ export default function StoryboardPage() {
               >
                 <Type size={16} />
                 テロップ設定
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowShortcutsHelp(true)}
+                className="gap-2"
+                title="キーボードショートカット一覧 (?キー)"
+              >
+                ?
               </Button>
               <Button
                 onClick={() => {
@@ -2696,6 +2710,39 @@ export default function StoryboardPage() {
               }}
               onClose={() => setShowTelopSettings(false)}
             />
+            {/* ショートカットヘルプ(? キーで開閉) */}
+            <Dialog open={showShortcutsHelp} onOpenChange={(o) => setShowShortcutsHelp(o)}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>キーボードショートカット</DialogTitle>
+                  <DialogDescription>
+                    入力欄にフォーカスがないときだけ有効です
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-2 text-sm">
+                  {[
+                    { k: '?', d: 'このヘルプを開閉' },
+                    { k: '/', d: 'セリフ検索ボックスにフォーカス' },
+                    { k: 'Esc', d: '選択解除 / 全展開解除 / 展開シーンを閉じる' },
+                    { k: 'Ctrl / ⌘ + A', d: '現在の動画内のシーンを全選択' },
+                    { k: 'Ctrl / ⌘ + D', d: '選択 or 展開中のシーンを複製' },
+                    { k: 'Delete / Backspace', d: '選択中のシーンを一括削除' },
+                  ].map((row) => (
+                    <div
+                      key={row.k}
+                      className="flex items-center justify-between gap-3 px-3 py-2 bg-background border border-border rounded"
+                    >
+                      <kbd className="px-2 py-0.5 rounded bg-muted text-xs font-mono text-foreground tabular-nums">
+                        {row.k}
+                      </kbd>
+                      <span className="text-muted-foreground text-right flex-1">
+                        {row.d}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </DialogContent>
+            </Dialog>
             {/* BGM 一括変更ダイアログ */}
             <Dialog open={showBulkBgm} onOpenChange={(o) => !o && setShowBulkBgm(false)}>
               <DialogContent className="max-w-md">
@@ -2844,6 +2891,7 @@ function ScenePlayerDialog({
   const bgmRef = useRef<HTMLAudioElement | null>(null)
   const seRef = useRef<HTMLAudioElement | null>(null)
   const pauseTimerRef = useRef<number | null>(null)
+  const queueListRef = useRef<HTMLOListElement | null>(null)
 
   // scene が変わったらリセット
   useEffect(() => {
@@ -2992,6 +3040,18 @@ function ScenePlayerDialog({
     }
   }, [playing])
 
+  // 現在再生中のセリフへキューリストを自動スクロール
+  useEffect(() => {
+    const ol = queueListRef.current
+    if (!ol) return
+    const target = ol.querySelector(
+      `[data-queue-idx="${index}"]`,
+    ) as HTMLElement | null
+    if (target) {
+      target.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [index])
+
   // startAtSdId が指定されたら該当 index に合わせて自動再生開始
   useEffect(() => {
     if (!startAtSdId || queue.length === 0) return
@@ -3088,10 +3148,11 @@ function ScenePlayerDialog({
             {/* セリフ一覧(プレビュー) */}
             <div className="border-t border-border pt-3">
               <p className="text-xs text-muted-foreground mb-2">再生キュー</p>
-              <ol className="space-y-1 text-sm">
+              <ol ref={queueListRef} className="space-y-1 text-sm max-h-48 overflow-y-auto">
                 {queue.map((q, i) => (
                   <li
                     key={i}
+                    data-queue-idx={i}
                     className={`px-2 py-1 rounded ${
                       i === index ? 'bg-primary/20 text-primary font-medium' : 'text-muted-foreground'
                     }`}

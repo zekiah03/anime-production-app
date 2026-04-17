@@ -63,6 +63,8 @@ export default function EnvironmentPage() {
   const [seedingSe, setSeedingSe] = useState(false)
   const [seedingIllust, setSeedingIllust] = useState(false)
   const illustImageInputRef = useRef<HTMLInputElement | null>(null)
+  // D&D 用: いまどのタブの上にファイルがドラッグされているか
+  const [dragOverTab, setDragOverTab] = useState<'images' | 'bgm' | 'se' | null>(null)
 
   const selected = illustrations.find((i) => i.id === selectedId) ?? null
 
@@ -225,6 +227,45 @@ export default function EnvironmentPage() {
     }
     setIllustrations((prev) => [...created, ...prev])
     if (created[0]) setSelectedId(created[0].id)
+  }
+
+  // D&D: タブに応じてファイルを振り分ける
+  function makeDropHandler(tab: 'images' | 'bgm' | 'se') {
+    return {
+      onDragOver: (e: React.DragEvent) => {
+        if (e.dataTransfer.types.includes('Files')) {
+          e.preventDefault()
+          setDragOverTab(tab)
+        }
+      },
+      onDragLeave: (e: React.DragEvent) => {
+        // 子要素に移っただけでは leave 扱いしない
+        if (e.currentTarget === e.target) setDragOverTab(null)
+      },
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault()
+        setDragOverTab(null)
+        const files = e.dataTransfer.files
+        if (!files || files.length === 0) return
+        if (tab === 'images') {
+          // 画像ファイルのみ通す
+          const imgs = Array.from(files).filter((f) => f.type.startsWith('image/'))
+          if (imgs.length > 0) {
+            const dt = new DataTransfer()
+            imgs.forEach((f) => dt.items.add(f))
+            handleQuickAddImages(dt.files)
+          }
+        } else {
+          const audios = Array.from(files).filter((f) => f.type.startsWith('audio/'))
+          if (audios.length > 0) {
+            const dt = new DataTransfer()
+            audios.forEach((f) => dt.items.add(f))
+            if (tab === 'bgm') handleAddBgmFiles(dt.files)
+            else handleAddSeFiles(dt.files)
+          }
+        }
+      },
+    }
   }
 
   async function handleSeedIllustrations() {
@@ -516,6 +557,17 @@ export default function EnvironmentPage() {
             </TabsList>
 
             <TabsContent value="images" className="mt-6 space-y-4">
+              <div
+                {...makeDropHandler('images')}
+                className={`space-y-4 rounded-lg transition ${
+                  dragOverTab === 'images' ? 'ring-2 ring-primary bg-primary/5 p-2' : ''
+                }`}
+              >
+              {dragOverTab === 'images' && (
+                <div className="text-center text-sm font-medium text-primary py-2">
+                  ここに画像ファイルをドロップ(複数ファイル可)
+                </div>
+              )}
               <Card className="bg-card border-border p-4">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
@@ -792,9 +844,21 @@ export default function EnvironmentPage() {
               )}
             </div>
           </div>
+              </div>
             </TabsContent>
 
             <TabsContent value="bgm" className="mt-6">
+              <div
+                {...makeDropHandler('bgm')}
+                className={`rounded-lg transition ${
+                  dragOverTab === 'bgm' ? 'ring-2 ring-primary bg-primary/5 p-2' : ''
+                }`}
+              >
+              {dragOverTab === 'bgm' && (
+                <div className="text-center text-sm font-medium text-primary py-2">
+                  ここに音声ファイルをドロップしてBGMとして取り込み
+                </div>
+              )}
               <Card className="bg-card border-border p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div>
@@ -880,9 +944,21 @@ export default function EnvironmentPage() {
                   </div>
                 )}
               </Card>
+              </div>
             </TabsContent>
 
             <TabsContent value="se" className="mt-6">
+              <div
+                {...makeDropHandler('se')}
+                className={`rounded-lg transition ${
+                  dragOverTab === 'se' ? 'ring-2 ring-primary bg-primary/5 p-2' : ''
+                }`}
+              >
+              {dragOverTab === 'se' && (
+                <div className="text-center text-sm font-medium text-primary py-2">
+                  ここに音声ファイルをドロップしてSEとして取り込み
+                </div>
+              )}
               <Card className="bg-card border-border p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div>
@@ -964,6 +1040,7 @@ export default function EnvironmentPage() {
                   </div>
                 )}
               </Card>
+              </div>
             </TabsContent>
           </Tabs>
         </div>
