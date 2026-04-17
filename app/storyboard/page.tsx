@@ -1439,6 +1439,43 @@ export default function StoryboardPage() {
   }
 
   // SceneDialogue の SE / キャラ位置 / 反転 / 間合い / テロップ上書き を更新
+  // シーン内のセリフを 1 つずつ上/下に移動
+  async function handleMoveSceneDialogue(sceneId: string, sdId: string, step: -1 | 1) {
+    const scene = scenes.find((s) => s.id === sceneId)
+    if (!scene) return
+    const sorted = [...scene.dialogues].sort((a, b) => a.order_index - b.order_index)
+    const idx = sorted.findIndex((sd) => sd.id === sdId)
+    const swapWith = idx + step
+    if (idx === -1 || swapWith < 0 || swapWith >= sorted.length) return
+    const a = sorted[idx]
+    const b = sorted[swapWith]
+    // order_index を入れ替え
+    const now = new Date().toISOString()
+    const updA = { ...a, order_index: b.order_index }
+    const updB = { ...b, order_index: a.order_index }
+    const stripDialogue = (sd: typeof updA) => {
+      const { dialogue: _d, ...row } = sd
+      void _d
+      return row as SceneDialogue
+    }
+    await saveSceneDialogue(stripDialogue(updA))
+    await saveSceneDialogue(stripDialogue(updB))
+    setScenes((prev) =>
+      prev.map((s) => {
+        if (s.id !== sceneId) return s
+        return {
+          ...s,
+          dialogues: s.dialogues.map((sd) => {
+            if (sd.id === updA.id) return updA
+            if (sd.id === updB.id) return updB
+            return sd
+          }),
+          updated_at: now,
+        }
+      }),
+    )
+  }
+
   function updateSceneDialogueMeta(
     sceneId: string,
     sdId: string,
@@ -1608,6 +1645,35 @@ export default function StoryboardPage() {
     setCharReplaceFrom('')
     setCharReplaceTo('')
     alert(`${updated.size} 件のセリフを置換しました`)
+  }
+
+  // シーンの title / description をその場で更新
+  async function handleUpdateSceneFields(
+    sceneId: string,
+    patch: Partial<Pick<Scene, 'title' | 'description'>>,
+  ) {
+    const existing = scenes.find((s) => s.id === sceneId)
+    if (!existing) return
+    const now = new Date().toISOString()
+    const updated: Scene = {
+      id: existing.id,
+      title: patch.title !== undefined ? patch.title : existing.title,
+      description:
+        patch.description !== undefined ? patch.description : existing.description,
+      background_illustration_id: existing.background_illustration_id,
+      bgm_track_id: existing.bgm_track_id,
+      bgm_volume: existing.bgm_volume,
+      video_id: existing.video_id ?? null,
+      order_index: existing.order_index,
+      created_at: existing.created_at,
+      updated_at: now,
+    }
+    await saveScene(updated)
+    setScenes((prev) =>
+      prev.map((s) =>
+        s.id === sceneId ? { ...updated, dialogues: s.dialogues } : s,
+      ),
+    )
   }
 
   // シーンを同動画内で1つ上/下に移動(ドラッグ不要)
@@ -2110,6 +2176,55 @@ export default function StoryboardPage() {
                       </button>
                     )}
                   </div>
+                  {(() => {
+                    const q = searchQuery.trim().toLowerCase()
+                    if (!q) return null
+                    // 現動画内で、タイトル or セリフが q を含むシーン
+                    const hits = scenes
+                      .filter((s) => (s.video_id ?? null) === selectedVideoId)
+                      .sort((a, b) => a.order_index - b.order_index)
+                      .filter(
+                        (s) =>
+                          (s.title ?? '').toLowerCase().includes(q) ||
+                          s.dialogues.some((sd) =>
+                            (sd.dialogue?.text ?? '').toLowerCase().includes(q),
+                          ),
+                      )
+                    const curIdx = hits.findIndex((s) => s.id === selectedSceneId)
+                    const jumpTo = (step: -1 | 1) => {
+                      if (hits.length === 0) return
+                      const nextIdx =
+                        curIdx === -1 ? (step === 1 ? 0 : hits.length - 1) : (curIdx + step + hits.length) % hits.length
+                      setSelectedSceneId(hits[nextIdx].id)
+                    }
+                    return (
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          {hits.length === 0
+                            ? '0件'
+                            : `${curIdx === -1 ? '?' : curIdx + 1}/${hits.length}`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => jumpTo(-1)}
+                          disabled={hits.length === 0}
+                          className="h-9 w-8 rounded border border-input hover:bg-primary/10 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
+                          title="前のヒットへ"
+                        >
+                          <ChevronUp size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => jumpTo(1)}
+                          disabled={hits.length === 0}
+                          className="h-9 w-8 rounded border border-input hover:bg-primary/10 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
+                          title="次のヒットへ"
+                        >
+                          <ChevronDown size={14} />
+                        </button>
+                      </div>
+                    )
+                  })()}
                   <Button
                     size="sm"
                     variant={replaceMode ? 'default' : 'outline'}
@@ -2365,6 +2480,38 @@ export default function StoryboardPage() {
                                   </button>
                                 </div>
                               )}
+                              {/* タイトル / 説明をその場で編集 */}
+                              <div className="space-y-2">
+                                <div>
+                                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">
+                                    タイトル
+                                  </label>
+                                  <Input
+                                    type="text"
+                                    value={scene.title ?? ''}
+                                    onChange={(e) =>
+                                      handleUpdateSceneFields(scene.id, { title: e.target.value })
+                                    }
+                                    className="bg-background border-input h-8 text-sm"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">
+                                    説明(任意)
+                                  </label>
+                                  <textarea
+                                    value={scene.description ?? ''}
+                                    onChange={(e) =>
+                                      handleUpdateSceneFields(scene.id, {
+                                        description: e.target.value || null,
+                                      })
+                                    }
+                                    rows={2}
+                                    placeholder="このシーンの意図やメモ…"
+                                    className="w-full px-2 py-1 bg-background border border-input rounded text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-y"
+                                  />
+                                </div>
+                              </div>
                               {/* 縮めるボタン + 別動画への移動/コピー */}
                               <div className="flex items-center justify-between gap-2 flex-wrap">
                                 <div className="flex items-center gap-1 flex-wrap">
@@ -2703,6 +2850,36 @@ export default function StoryboardPage() {
                                             )}
                                           </div>
                                           <div className="flex items-center gap-1 flex-shrink-0">
+                                            {(() => {
+                                              const sorted = [...scene.dialogues].sort(
+                                                (a, b) => a.order_index - b.order_index,
+                                              )
+                                              const idx = sorted.findIndex((x) => x.id === sd.id)
+                                              return (
+                                                <>
+                                                  <button
+                                                    onClick={() =>
+                                                      handleMoveSceneDialogue(scene.id, sd.id, -1)
+                                                    }
+                                                    disabled={idx === 0}
+                                                    className="p-1 hover:bg-primary/20 rounded transition disabled:opacity-30 disabled:cursor-not-allowed"
+                                                    title="上へ"
+                                                  >
+                                                    <ChevronUp size={12} className="text-muted-foreground" />
+                                                  </button>
+                                                  <button
+                                                    onClick={() =>
+                                                      handleMoveSceneDialogue(scene.id, sd.id, 1)
+                                                    }
+                                                    disabled={idx === sorted.length - 1}
+                                                    className="p-1 hover:bg-primary/20 rounded transition disabled:opacity-30 disabled:cursor-not-allowed"
+                                                    title="下へ"
+                                                  >
+                                                    <ChevronDown size={12} className="text-muted-foreground" />
+                                                  </button>
+                                                </>
+                                              )
+                                            })()}
                                             <button
                                               onClick={() => setPreviewingSdId(sd.id)}
                                               className="p-1 hover:bg-primary/20 rounded transition"
