@@ -1,9 +1,11 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import { ToastProvider } from '@/components/toast'
 import { AppErrorBoundary } from '@/components/error-boundary'
+import { ServiceWorkerRegister } from '@/components/sw-register'
+import { FirstTimeTour } from '@/components/first-time-tour'
 
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
@@ -16,7 +18,6 @@ export const metadata: Metadata = {
   description: 'ブラウザで完結するアニメ制作ワークフロー。キャラ・音声・シーン・BGM・SE を統合管理し、動画まで書き出せます。',
   applicationName: 'AnimeStudio',
   manifest: '/manifest.webmanifest',
-  themeColor: '#0b0b0b',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
@@ -41,6 +42,10 @@ export const metadata: Metadata = {
   },
 }
 
+export const viewport: Viewport = {
+  themeColor: '#0b0b0b',
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -50,7 +55,11 @@ export default function RootLayout({
     <html lang="ja" className="dark bg-background">
       <body className="font-sans antialiased">
         <AppErrorBoundary>
-          <ToastProvider>{children}</ToastProvider>
+          <ToastProvider>
+            <ServiceWorkerRegister />
+            <FirstTimeTour />
+            {children}
+          </ToastProvider>
         </AppErrorBoundary>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>

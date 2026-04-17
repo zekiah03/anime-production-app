@@ -15,6 +15,7 @@ import { useToast } from '@/components/toast'
 import { useSaveStatus, SaveStatusBadge } from '@/components/save-status'
 import { StorageBadge } from '@/components/storage-badge'
 import { StoryboardEmptyState } from '@/components/empty-state'
+import { resetFirstTimeTour } from '@/components/first-time-tour'
 import { charColorHsl } from '@/lib/char-color'
 import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
@@ -4910,6 +4911,19 @@ export default function StoryboardPage() {
                       </span>
                     </div>
                   ))}
+                </div>
+                <div className="border-t border-border pt-3 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetFirstTimeTour()
+                      setShowShortcutsHelp(false)
+                      window.location.reload()
+                    }}
+                    className="text-xs text-muted-foreground hover:text-foreground underline"
+                  >
+                    はじめてのツアーをもう一度見る
+                  </button>
                 </div>
               </DialogContent>
             </Dialog>

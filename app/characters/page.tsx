@@ -58,6 +58,9 @@ export default function CharactersPage() {
   })
   const [editingId, setEditingId] = useState<string | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
+  // 検索・並び替え
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortBy, setSortBy] = useState<'name' | 'created' | 'updated'>('updated')
 
   useEffect(() => {
     getAllCharacters()
@@ -248,9 +251,51 @@ export default function CharactersPage() {
               <h3 className="text-xl font-semibold text-foreground mb-2">キャラクターがありません</h3>
               <p className="text-muted-foreground">「新規作成」ボタンで最初のキャラクターを作成してください</p>
             </Card>
-          ) : (
+          ) : (() => {
+            const q = searchQuery.trim().toLowerCase()
+            const filtered = characters
+              .filter(
+                (c) =>
+                  q.length === 0 ||
+                  c.name.toLowerCase().includes(q) ||
+                  (c.description ?? '').toLowerCase().includes(q),
+              )
+              .sort((a, b) => {
+                if (sortBy === 'name') return a.name.localeCompare(b.name, 'ja')
+                if (sortBy === 'created')
+                  return (b.created_at ?? '').localeCompare(a.created_at ?? '')
+                return (b.updated_at ?? '').localeCompare(a.updated_at ?? '')
+              })
+            return (
+              <>
+                <div className="flex items-center gap-2 mb-4 flex-wrap">
+                  <Input
+                    type="text"
+                    placeholder="名前・説明で検索..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="flex-1 min-w-[200px] bg-background border-input h-9 text-sm"
+                  />
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as 'name' | 'created' | 'updated')}
+                    className="h-9 px-3 bg-background border border-input rounded-md text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="updated">更新が新しい順</option>
+                    <option value="created">作成が新しい順</option>
+                    <option value="name">名前順(あいうえお)</option>
+                  </select>
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {filtered.length} / {characters.length}
+                  </span>
+                </div>
+                {filtered.length === 0 ? (
+                  <Card className="bg-card border-border p-8 text-center text-muted-foreground">
+                    該当するキャラクターがありません
+                  </Card>
+                ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {characters.map((character) => (
+              {filtered.map((character) => (
                 <Card key={character.id} className="bg-card border-border p-6 hover:border-primary/50 transition">
                   <div className="flex items-start gap-4 mb-3">
                     {character.image_url ? (
@@ -299,7 +344,10 @@ export default function CharactersPage() {
                 </Card>
               ))}
             </div>
-          )}
+                )}
+              </>
+            )
+          })()}
         </div>
       </main>
 
