@@ -16,11 +16,12 @@ import type {
   Illustration,
   Layer,
   TelopStyle,
+  Video,
 } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 
 const DB_NAME = 'anime-production'
-const DB_VERSION = 6
+const DB_VERSION = 7
 
 // 永続化形式 (file_url / image_url は実行時に Blob から生成するので保存しない)
 type StoredCharacter = Omit<Character, 'image_url'> & { image_blob?: Blob }
@@ -69,6 +70,8 @@ interface AnimeDB extends DBSchema {
     value: SceneCastMember
     indexes: { by_scene: string; by_character: string }
   }
+  // 動画(シーンの入れ物)
+  videos: { key: string; value: Video }
 }
 
 let dbPromise: Promise<IDBPDatabase<AnimeDB>> | null = null
@@ -123,6 +126,9 @@ function getDB() {
           const store = db.createObjectStore('scene_cast', { keyPath: 'id' })
           store.createIndex('by_scene', 'scene_id')
           store.createIndex('by_character', 'character_id')
+        }
+        if (!db.objectStoreNames.contains('videos')) {
+          db.createObjectStore('videos', { keyPath: 'id' })
         }
       },
     })
@@ -484,6 +490,32 @@ export async function deleteSoundEffect(id: string): Promise<void> {
   for await (const cursor of tx.objectStore('scene_dialogues').iterate()) {
     if (cursor.value.se_id === id) {
       await cursor.update({ ...cursor.value, se_id: null })
+    }
+  }
+  await tx.done
+}
+
+// ==================== Videos(シーンの入れ物) ====================
+
+export async function getAllVideos(): Promise<Video[]> {
+  const db = await getDB()
+  const all = await db.getAll('videos')
+  return all.sort((a, b) => a.order_index - b.order_index)
+}
+
+export async function saveVideo(video: Video): Promise<void> {
+  const db = await getDB()
+  await db.put('videos', video)
+}
+
+export async function deleteVideo(id: string): Promise<void> {
+  const db = await getDB()
+  // その動画に属していたシーンは未分類(video_id=null)に外す
+  const tx = db.transaction(['videos', 'scenes'], 'readwrite')
+  await tx.objectStore('videos').delete(id)
+  for await (const cursor of tx.objectStore('scenes').iterate()) {
+    if (cursor.value.video_id === id) {
+      await cursor.update({ ...cursor.value, video_id: null })
     }
   }
   await tx.done

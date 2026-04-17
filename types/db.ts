@@ -99,6 +99,17 @@ export interface Scene {
   background_illustration_id: string | null // 背景に使う環境素材
   bgm_track_id: string | null // シーン全体に流す BGM
   bgm_volume: number // 0..1(未指定なら再生側で 0.25 を既定にする)
+  // 所属する動画(未指定なら「未分類」扱い)
+  video_id?: string | null
+  order_index: number
+  created_at: string
+  updated_at: string
+}
+
+// シーンの入れ物。複数本の動画をこのアプリ1つで作り分けるために使う。
+export interface Video {
+  id: string
+  name: string
   order_index: number
   created_at: string
   updated_at: string

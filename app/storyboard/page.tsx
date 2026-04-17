@@ -4,17 +4,18 @@ import { useEffect, useRef, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video, Type, FlipHorizontal, ChevronDown, ChevronUp, Minimize2 } from 'lucide-react'
+import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video as VideoIcon, Type, FlipHorizontal, ChevronDown, ChevronUp, Minimize2, Pencil, Folder, FolderPlus } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar'
 import { SceneExportDialog } from '@/components/scene-export-dialog'
 import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
 import { SceneTimelineBar, type TimelineClip } from '@/components/scene-timeline'
-import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, SceneCastMember } from '@/types/db'
+import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, SceneCastMember, Video } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
   deleteScene,
   deleteSceneCastMember,
   deleteSceneDialogue,
+  deleteVideo,
   getAllAudioFiles,
   getAllBgmTracks,
   getAllCharacters,
@@ -25,6 +26,7 @@ import {
   getAllSceneDialogues,
   getAllScenes,
   getAllSoundEffects,
+  getAllVideos,
   getLayersByIllustration,
   getTelopStyle,
   saveDialogue,
@@ -33,6 +35,7 @@ import {
   saveSceneDialogue,
   saveScenesBatch,
   saveTelopStyle,
+  saveVideo,
 } from '@/lib/db'
 import { LipSyncStage } from '@/components/lip-sync-stage'
 import {
@@ -53,6 +56,10 @@ export default function StoryboardPage() {
   const [bgmTracks, setBgmTracks] = useState<BgmTrack[]>([])
   const [sounds, setSounds] = useState<SoundEffect[]>([])
   const [cast, setCast] = useState<SceneCastMember[]>([])
+  const [videos, setVideos] = useState<Video[]>([])
+  const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null)
+  const [editingVideoId, setEditingVideoId] = useState<string | null>(null)
+  const [editingVideoName, setEditingVideoName] = useState('')
   const [loading, setLoading] = useState(true)
   const [showSceneForm, setShowSceneForm] = useState(false)
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null)
@@ -62,6 +69,7 @@ export default function StoryboardPage() {
     background_illustration_id: '',
     bgm_track_id: '',
     bgm_volume: 0.25,
+    video_id: '',
   })
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
   const [dialogueToAdd, setDialogueToAdd] = useState('')
@@ -81,7 +89,7 @@ export default function StoryboardPage() {
 
   async function loadAll() {
     try {
-      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts, allBgm, allSe, savedTelop, allCast] = await Promise.all([
+      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts, allBgm, allSe, savedTelop, allCast, loadedVideos] = await Promise.all([
         getAllScenes(),
         getAllSceneDialogues(),
         getAllDialogues(),
@@ -93,7 +101,40 @@ export default function StoryboardPage() {
         getAllSoundEffects(),
         getTelopStyle(),
         getAllSceneCast(),
+        getAllVideos(),
       ])
+
+      // 旧データ互換: 動画が1つもなく、未分類シーンがある場合は自動で「動画1」を作って全シーンを移す
+      let workingVideos = loadedVideos
+      let workingScenes = rawScenes
+      if (workingVideos.length === 0 && rawScenes.length > 0) {
+        const now = new Date().toISOString()
+        const defaultVideo: Video = {
+          id: crypto.randomUUID(),
+          name: '動画1',
+          order_index: 0,
+          created_at: now,
+          updated_at: now,
+        }
+        await saveVideo(defaultVideo)
+        const migratedScenes = rawScenes.map((s) => ({ ...s, video_id: defaultVideo.id }))
+        await Promise.all(migratedScenes.map((s) => saveScene(s)))
+        workingVideos = [defaultVideo]
+        workingScenes = migratedScenes
+      }
+      // まだ動画が1つもなければ 動画1 を作って選択状態にする
+      if (workingVideos.length === 0) {
+        const now = new Date().toISOString()
+        const defaultVideo: Video = {
+          id: crypto.randomUUID(),
+          name: '動画1',
+          order_index: 0,
+          created_at: now,
+          updated_at: now,
+        }
+        await saveVideo(defaultVideo)
+        workingVideos = [defaultVideo]
+      }
       const withLayers: IllustrationWithLayers[] = await Promise.all(
         illusts.map(async (i) => ({
           ...i,
@@ -101,7 +142,7 @@ export default function StoryboardPage() {
         })),
       )
       const dialogueById = new Map(allDialogues.map((d) => [d.id, d]))
-      const combined: SceneWithDialogues[] = rawScenes.map((scene) => ({
+      const combined: SceneWithDialogues[] = workingScenes.map((scene) => ({
         ...scene,
         dialogues: sceneDialogues
           .filter((sd) => sd.scene_id === scene.id)
@@ -118,6 +159,9 @@ export default function StoryboardPage() {
       setSounds(allSe)
       setTelopStyle(savedTelop)
       setCast(allCast)
+      setVideos(workingVideos)
+      // デフォルト選択: 先頭の動画
+      setSelectedVideoId((prev) => prev ?? workingVideos[0]?.id ?? null)
     } catch (e) {
       console.error('[anime-app] load storyboard failed', e)
     } finally {
@@ -128,6 +172,79 @@ export default function StoryboardPage() {
   function bgmForScene(scene: Scene): BgmTrack | null {
     if (!scene.bgm_track_id) return null
     return bgmTracks.find((t) => t.id === scene.bgm_track_id) ?? null
+  }
+
+  // ==================== 動画(Video)管理 ====================
+
+  async function handleCreateVideo() {
+    const name = window.prompt(
+      '新しい動画の名前を入力してください',
+      `動画${videos.length + 1}`,
+    )
+    if (!name || !name.trim()) return
+    const now = new Date().toISOString()
+    const video: Video = {
+      id: crypto.randomUUID(),
+      name: name.trim(),
+      order_index: videos.length,
+      created_at: now,
+      updated_at: now,
+    }
+    await saveVideo(video)
+    setVideos((prev) => [...prev, video])
+    setSelectedVideoId(video.id)
+  }
+
+  async function handleRenameVideo(id: string, name: string) {
+    if (!name.trim()) return
+    const existing = videos.find((v) => v.id === id)
+    if (!existing) return
+    const updated: Video = { ...existing, name: name.trim(), updated_at: new Date().toISOString() }
+    await saveVideo(updated)
+    setVideos((prev) => prev.map((v) => (v.id === id ? updated : v)))
+  }
+
+  async function handleDeleteVideo(id: string) {
+    const video = videos.find((v) => v.id === id)
+    if (!video) return
+    const scenesInVideo = scenes.filter((s) => (s.video_id ?? null) === id).length
+    const msg =
+      scenesInVideo > 0
+        ? `動画「${video.name}」を削除しますか?\n含まれる ${scenesInVideo} 個のシーンは「未分類」に移動します(シーン自体は削除されません)。`
+        : `動画「${video.name}」を削除しますか?`
+    if (!window.confirm(msg)) return
+    await deleteVideo(id)
+    setVideos((prev) => prev.filter((v) => v.id !== id))
+    // シーン側の video_id を null に反映(DB は deleteVideo 内で既に更新済み)
+    setScenes((prev) =>
+      prev.map((s) => (s.video_id === id ? { ...s, video_id: null } : s)),
+    )
+    // 削除後は先頭の動画を選択(なければ null = 未分類)
+    setSelectedVideoId(videos.find((v) => v.id !== id)?.id ?? null)
+  }
+
+  // ある動画にシーンを移す(シーン編集フォームから使う)
+  async function handleMoveSceneToVideo(sceneId: string, videoId: string | null) {
+    const scene = scenes.find((s) => s.id === sceneId)
+    if (!scene) return
+    const updated: Scene = {
+      id: scene.id,
+      title: scene.title,
+      description: scene.description,
+      background_illustration_id: scene.background_illustration_id,
+      bgm_track_id: scene.bgm_track_id,
+      bgm_volume: scene.bgm_volume,
+      video_id: videoId,
+      order_index: scene.order_index,
+      created_at: scene.created_at,
+      updated_at: new Date().toISOString(),
+    }
+    await saveScene(updated)
+    setScenes((prev) =>
+      prev.map((s) =>
+        s.id === sceneId ? { ...updated, dialogues: s.dialogues } : s,
+      ),
+    )
   }
 
   // タイムライン用: 各セリフ(SceneDialogue)の所要時間などを計算する
@@ -303,6 +420,7 @@ export default function StoryboardPage() {
         background_illustration_id: sceneFormData.background_illustration_id || null,
         bgm_track_id: sceneFormData.bgm_track_id || null,
         bgm_volume: sceneFormData.bgm_volume,
+        video_id: sceneFormData.video_id || null,
         order_index: existing.order_index,
         created_at: existing.created_at,
         updated_at: now,
@@ -322,6 +440,8 @@ export default function StoryboardPage() {
         background_illustration_id: sceneFormData.background_illustration_id || null,
         bgm_track_id: sceneFormData.bgm_track_id || null,
         bgm_volume: sceneFormData.bgm_volume,
+        // 新規シーンは「今見ている動画」に所属させる(フォームで変更可)
+        video_id: sceneFormData.video_id || selectedVideoId,
         order_index: maxOrder + 1,
         created_at: now,
         updated_at: now,
@@ -340,6 +460,7 @@ export default function StoryboardPage() {
       background_illustration_id: '',
       bgm_track_id: '',
       bgm_volume: 0.25,
+      video_id: '',
     })
     setShowSceneForm(false)
   }
@@ -453,6 +574,38 @@ export default function StoryboardPage() {
     setScenes(renumbered)
   }
 
+  // 動画内でのシーン並び替え(ドラッグ&ドロップ)。
+  // 表示中のシーンだけを対象に、既存の order_index 値を使い回して並び替える。
+  async function handleReorderSceneById(fromId: string, toId: string) {
+    if (fromId === toId) return
+    const videoId = selectedVideoId
+    const filtered = scenes
+      .filter((s) => (s.video_id ?? null) === videoId)
+      .sort((a, b) => a.order_index - b.order_index)
+    const fromIdx = filtered.findIndex((s) => s.id === fromId)
+    const toIdx = filtered.findIndex((s) => s.id === toId)
+    if (fromIdx === -1 || toIdx === -1) return
+    const working = [...filtered]
+    const [moved] = working.splice(fromIdx, 1)
+    working.splice(toIdx, 0, moved)
+    // 既存の order_index スロットを再利用して入れ替える
+    const slots = filtered.map((s) => s.order_index).sort((a, b) => a - b)
+    const renumbered = working.map((s, i) => ({ ...s, order_index: slots[i] }))
+    await saveScenesBatch(
+      renumbered.map((s) => {
+        const { dialogues: _d, ...row } = s
+        void _d
+        return row as Scene
+      }),
+    )
+    setScenes((prev) => {
+      const orderMap = new Map(renumbered.map((r) => [r.id, r.order_index]))
+      return prev.map((s) =>
+        orderMap.has(s.id) ? { ...s, order_index: orderMap.get(s.id) as number } : s,
+      )
+    })
+  }
+
   function handleEditScene(scene: Scene) {
     setSceneFormData({
       title: scene.title || '',
@@ -460,6 +613,7 @@ export default function StoryboardPage() {
       background_illustration_id: scene.background_illustration_id || '',
       bgm_track_id: scene.bgm_track_id || '',
       bgm_volume: typeof scene.bgm_volume === 'number' ? scene.bgm_volume : 0.25,
+      video_id: scene.video_id ?? '',
     })
     setEditingSceneId(scene.id)
     setShowSceneForm(true)
@@ -471,7 +625,7 @@ export default function StoryboardPage() {
 
       <main className="flex-1 overflow-auto">
         <div className="p-8">
-          <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-3xl font-bold text-foreground">ストーリーボード</h2>
               <p className="text-muted-foreground mt-1">シーンを構築してストーリーを作成</p>
@@ -489,7 +643,7 @@ export default function StoryboardPage() {
               <Button
                 onClick={() => {
                   setEditingSceneId(null)
-                  setSceneFormData({ title: '', description: '', background_illustration_id: '', bgm_track_id: '', bgm_volume: 0.25 })
+                  setSceneFormData({ title: '', description: '', background_illustration_id: '', bgm_track_id: '', bgm_volume: 0.25, video_id: '' })
                   setShowSceneForm(!showSceneForm)
                 }}
                 className="gap-2"
@@ -500,12 +654,139 @@ export default function StoryboardPage() {
             </div>
           </div>
 
+          {/* 動画タブ(シーンをまとめる入れ物) */}
+          <div className="mb-6 flex items-center gap-1 flex-wrap p-1.5 bg-card border border-border rounded-md">
+            <Folder size={14} className="text-muted-foreground ml-1" />
+            {videos.map((v) => {
+              const isActive = v.id === selectedVideoId
+              const isEditing = editingVideoId === v.id
+              const sceneCount = scenes.filter((s) => (s.video_id ?? null) === v.id).length
+              if (isEditing) {
+                return (
+                  <div key={v.id} className="flex items-center gap-1">
+                    <input
+                      autoFocus
+                      type="text"
+                      value={editingVideoName}
+                      onChange={(e) => setEditingVideoName(e.target.value)}
+                      onBlur={async () => {
+                        if (editingVideoName.trim()) await handleRenameVideo(v.id, editingVideoName)
+                        setEditingVideoId(null)
+                      }}
+                      onKeyDown={async (e) => {
+                        if (e.key === 'Enter') {
+                          if (editingVideoName.trim()) await handleRenameVideo(v.id, editingVideoName)
+                          setEditingVideoId(null)
+                        } else if (e.key === 'Escape') {
+                          setEditingVideoId(null)
+                        }
+                      }}
+                      className="px-2 py-1 bg-background border border-primary rounded text-sm text-foreground focus:outline-none"
+                    />
+                  </div>
+                )
+              }
+              return (
+                <div
+                  key={v.id}
+                  className={`flex items-center gap-1 rounded border transition ${
+                    isActive
+                      ? 'bg-primary/20 border-primary/40'
+                      : 'bg-background border-input hover:bg-primary/10'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedVideoId(v.id)}
+                    className={`pl-3 pr-1 py-1 text-sm ${
+                      isActive ? 'text-primary font-medium' : 'text-foreground'
+                    }`}
+                    title={`この動画のシーンを表示(${sceneCount} 個)`}
+                  >
+                    {v.name}
+                    <span className="text-xs text-muted-foreground ml-1.5">
+                      {sceneCount}
+                    </span>
+                  </button>
+                  {isActive && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingVideoId(v.id)
+                          setEditingVideoName(v.name)
+                        }}
+                        className="p-1 hover:bg-primary/20 rounded transition"
+                        title="名前変更"
+                      >
+                        <Pencil size={11} className="text-muted-foreground" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteVideo(v.id)}
+                        className="p-1 hover:bg-destructive/20 rounded transition mr-0.5"
+                        title="動画を削除(シーンは未分類へ)"
+                      >
+                        <Trash2 size={11} className="text-destructive" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              )
+            })}
+            {/* 未分類(null のシーンが1つ以上あるときだけ表示) */}
+            {scenes.some((s) => (s.video_id ?? null) === null) && (
+              <button
+                type="button"
+                onClick={() => setSelectedVideoId(null)}
+                className={`px-3 py-1 text-sm rounded border transition ${
+                  selectedVideoId === null
+                    ? 'bg-primary/20 border-primary/40 text-primary font-medium'
+                    : 'bg-background border-input text-muted-foreground hover:bg-primary/10'
+                }`}
+                title="どの動画にも所属していないシーン"
+              >
+                未分類
+                <span className="text-xs ml-1.5">
+                  {scenes.filter((s) => (s.video_id ?? null) === null).length}
+                </span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleCreateVideo}
+              className="px-2 py-1 text-sm rounded border border-dashed border-input text-muted-foreground hover:bg-primary/10 hover:text-primary transition gap-1 inline-flex items-center"
+              title="新規動画"
+            >
+              <FolderPlus size={12} />
+              新規
+            </button>
+          </div>
+
           {showSceneForm && (
             <Card className="bg-card border-border p-6 mb-8">
               <h3 className="text-xl font-semibold text-foreground mb-4">
                 {editingSceneId ? 'シーンを編集' : '新規シーンを作成'}
               </h3>
               <form onSubmit={handleAddScene} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">所属動画</label>
+                  <select
+                    value={sceneFormData.video_id}
+                    onChange={(e) => setSceneFormData({ ...sceneFormData, video_id: e.target.value })}
+                    className="w-full px-3 py-2 bg-background border border-input rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="">未分類</option>
+                    {videos.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    シーンが所属する動画。後から変更するとタブ間で移動します。
+                  </p>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-1">シーンタイトル</label>
                   <Input
@@ -597,7 +878,7 @@ export default function StoryboardPage() {
                     onClick={() => {
                       setShowSceneForm(false)
                       setEditingSceneId(null)
-                      setSceneFormData({ title: '', description: '', background_illustration_id: '', bgm_track_id: '', bgm_volume: 0.25 })
+                      setSceneFormData({ title: '', description: '', background_illustration_id: '', bgm_track_id: '', bgm_volume: 0.25, video_id: '' })
                     }}
                   >
                     キャンセル
@@ -615,24 +896,34 @@ export default function StoryboardPage() {
                 <div className="text-center py-12">
                   <p className="text-muted-foreground">読み込み中...</p>
                 </div>
-              ) : scenes.length === 0 ? (
-                <Card className="bg-card border-border p-12 text-center">
-                  <Film size={48} className="mx-auto text-muted-foreground mb-4" />
-                  <h3 className="text-xl font-semibold text-foreground mb-2">シーンがありません</h3>
-                  <p className="text-muted-foreground">「新規シーン」ボタンで最初のシーンを作成してください</p>
-                </Card>
-              ) : (
+              ) : (() => {
+                const filteredScenes = scenes
+                  .filter((s) => (s.video_id ?? null) === selectedVideoId)
+                  .sort((a, b) => a.order_index - b.order_index)
+                if (filteredScenes.length === 0) {
+                  return (
+                    <Card className="bg-card border-border p-12 text-center">
+                      <Film size={48} className="mx-auto text-muted-foreground mb-4" />
+                      <h3 className="text-xl font-semibold text-foreground mb-2">
+                        この動画にはまだシーンがありません
+                      </h3>
+                      <p className="text-muted-foreground">
+                        「新規シーン」ボタンで最初のシーンを作成してください
+                      </p>
+                    </Card>
+                  )
+                }
+                return (
                 <div className="space-y-3">
-                  {scenes.map((scene, index) => (
+                  {filteredScenes.map((scene, index) => (
                     <Card
                       key={scene.id}
                       draggable
                       onDragStart={() => setDraggedSceneId(scene.id)}
                       onDragOver={(e) => e.preventDefault()}
                       onDrop={() => {
-                        const fromIndex = scenes.findIndex((s) => s.id === draggedSceneId)
-                        if (fromIndex !== -1) {
-                          handleReorderScenes(fromIndex, index)
+                        if (draggedSceneId && draggedSceneId !== scene.id) {
+                          handleReorderSceneById(draggedSceneId, scene.id)
                         }
                       }}
                       className="bg-card border-border p-4 hover:border-primary/50 transition cursor-move"
@@ -1143,7 +1434,7 @@ export default function StoryboardPage() {
                             className="p-2 hover:bg-primary/20 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
                             title="動画書き出し"
                           >
-                            <Video size={16} className="text-primary" />
+                            <VideoIcon size={16} className="text-primary" />
                           </button>
                           <button
                             onClick={() => handleEditScene(scene)}
@@ -1162,7 +1453,8 @@ export default function StoryboardPage() {
                     </Card>
                   ))}
                 </div>
-              )}
+                )
+              })()}
             </div>
 
             {/* 統計情報 */}
