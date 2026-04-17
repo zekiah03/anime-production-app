@@ -17,6 +17,9 @@ interface LipSyncStageProps {
   telopStyle?: TelopStyle | null
   // 背景レイヤー(order_index 昇順、可視のみ)。キャラ画像の後ろに重ねる。
   backgroundLayers?: Layer[]
+  // 立ち位置 (0..1, 0.5=中央) と縦方向スケール (1.0=ステージ高さいっぱい)
+  characterX?: number
+  characterScale?: number
   onEnded?: () => void
   className?: string
 }
@@ -33,10 +36,14 @@ export function LipSyncStage({
   caption,
   telopStyle,
   backgroundLayers,
+  characterX,
+  characterScale,
   onEnded,
   className,
 }: LipSyncStageProps) {
   const effectiveStyle = telopStyle ?? DEFAULT_TELOP_STYLE
+  const cx = typeof characterX === 'number' ? characterX : 0.5
+  const cs = typeof characterScale === 'number' ? characterScale : 1.0
   const [mouthOpen, setMouthOpen] = useState(false)
   const [blinking, setBlinking] = useState(false)
 
@@ -206,7 +213,16 @@ export function LipSyncStage({
           key={img}
           src={img}
           alt={character?.name ?? ''}
-          className="relative w-full h-full object-contain"
+          className="absolute"
+          style={{
+            bottom: 0,
+            left: `${cx * 100}%`,
+            height: `${cs * 100}%`,
+            width: 'auto',
+            maxWidth: 'none',
+            transform: 'translateX(-50%)',
+            objectFit: 'contain',
+          }}
         />
       ) : (
         <div className="relative text-center text-muted-foreground p-4">

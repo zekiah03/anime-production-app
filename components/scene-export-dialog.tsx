@@ -33,6 +33,8 @@ interface ResolvedDialogue {
   override: CharacterExpression | null
   se: SoundEffect | null
   seVolume: number
+  characterX: number
+  characterScale: number
 }
 
 // 書き出し解像度は縦型ショート動画を意識した 9:16。将来 UI で切替可能にしてもよい。
@@ -88,6 +90,8 @@ export function SceneExportDialog({
           const charExpressions = expressions.filter((x) => x.character_id === character.id)
           const se = sd.se_id ? sounds.find((s) => s.id === sd.se_id) ?? null : null
           const seVolume = typeof sd.se_volume === 'number' ? sd.se_volume : 1
+          const characterX = typeof sd.character_x === 'number' ? sd.character_x : 0.5
+          const characterScale = typeof sd.character_scale === 'number' ? sd.character_scale : 1.0
           return {
             text: d.text,
             character,
@@ -100,6 +104,8 @@ export function SceneExportDialog({
               : null,
             se,
             seVolume,
+            characterX,
+            characterScale,
           } as ResolvedDialogue
         })
         .filter((x): x is ResolvedDialogue => x !== null)
@@ -172,11 +178,18 @@ export function SceneExportDialog({
     if (imgUrl) {
       const img = cache.get(imgUrl)
       if (img) {
-        const scale = Math.min(WIDTH / img.width, HEIGHT / img.height)
-        const w = img.width * scale
-        const h = img.height * scale
-        const x = (WIDTH - w) / 2
-        const y = (HEIGHT - h) / 2
+        // まずキャンバスに「収まる」サイズを求める(横長でもはみ出ないよう最小スケール)
+        const fitScale = Math.min(WIDTH / img.width, HEIGHT / img.height)
+        const baseW = img.width * fitScale
+        const baseH = img.height * fitScale
+        // ユーザー指定の拡大率を掛ける。大きい時ははみ出て自然に切られる
+        const userScale = current.characterScale
+        const w = baseW * userScale
+        const h = baseH * userScale
+        // 水平位置 (0..1, 0.5=中央)、垂直は下端固定(立ち絵は脚元を床に)
+        const cx = WIDTH * current.characterX
+        const x = cx - w / 2
+        const y = HEIGHT - h
         ctx.drawImage(img, x, y, w, h)
       }
     }

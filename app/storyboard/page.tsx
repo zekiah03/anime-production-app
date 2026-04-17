@@ -208,6 +208,8 @@ export default function StoryboardPage() {
       order_index: maxOrder + 1,
       se_id: null,
       se_volume: 1,
+      character_x: 0.5,
+      character_scale: 1.0,
       created_at: now,
     }
     await saveSceneDialogue(newSceneDialogue)
@@ -222,8 +224,12 @@ export default function StoryboardPage() {
     setDialogueToAdd('')
   }
 
-  // SceneDialogue の SE 設定を更新(UI操作のたびにローカル先行で反映、DBは fire-and-forget)
-  function updateSceneDialogueSe(sceneId: string, sdId: string, patch: Partial<Pick<SceneDialogue, 'se_id' | 'se_volume'>>) {
+  // SceneDialogue の SE / キャラ位置 を更新(UI操作のたびにローカル先行で反映、DBは fire-and-forget)
+  function updateSceneDialogueMeta(
+    sceneId: string,
+    sdId: string,
+    patch: Partial<Pick<SceneDialogue, 'se_id' | 'se_volume' | 'character_x' | 'character_scale'>>,
+  ) {
     setScenes((prev) =>
       prev.map((s) => {
         if (s.id !== sceneId) return s
@@ -232,7 +238,6 @@ export default function StoryboardPage() {
           dialogues: s.dialogues.map((sd) => {
             if (sd.id !== sdId) return sd
             const merged = { ...sd, ...patch }
-            // 保存(dialogue は派生データなので取り除く)
             const { dialogue: _drop, ...rowPart } = merged
             void _drop
             const row: SceneDialogue = {
@@ -242,9 +247,15 @@ export default function StoryboardPage() {
               order_index: rowPart.order_index,
               se_id: rowPart.se_id ?? null,
               se_volume: typeof rowPart.se_volume === 'number' ? rowPart.se_volume : 1,
+              character_x:
+                typeof rowPart.character_x === 'number' ? rowPart.character_x : 0.5,
+              character_scale:
+                typeof rowPart.character_scale === 'number' ? rowPart.character_scale : 1.0,
               created_at: rowPart.created_at,
             }
-            saveSceneDialogue(row).catch((e) => console.error('[anime-app] save se on scene dialogue failed', e))
+            saveSceneDialogue(row).catch((e) =>
+              console.error('[anime-app] save scene dialogue failed', e),
+            )
             return merged
           }),
         }
@@ -487,6 +498,18 @@ export default function StoryboardPage() {
                                 <div className="space-y-2">
                                   {scene.dialogues.map((sd) => {
                                     const seVol = typeof sd.se_volume === 'number' ? sd.se_volume : 1
+                                    const cx = typeof sd.character_x === 'number' ? sd.character_x : 0.5
+                                    const cs = typeof sd.character_scale === 'number' ? sd.character_scale : 1.0
+                                    const posPreset: 'left' | 'center' | 'right' =
+                                      cx < 0.35 ? 'left' : cx > 0.65 ? 'right' : 'center'
+                                    const sizePreset: 'small' | 'medium' | 'large' =
+                                      cs < 0.7 ? 'small' : cs < 0.95 ? 'medium' : 'large'
+                                    const presetBtn = (active: boolean) =>
+                                      `px-2 py-0.5 text-xs rounded border transition ${
+                                        active
+                                          ? 'bg-primary/20 border-primary/40 text-primary'
+                                          : 'bg-card border-input text-muted-foreground hover:bg-primary/10'
+                                      }`
                                     return (
                                       <div
                                         key={sd.id}
@@ -509,7 +532,7 @@ export default function StoryboardPage() {
                                           <select
                                             value={sd.se_id ?? ''}
                                             onChange={(e) =>
-                                              updateSceneDialogueSe(scene.id, sd.id, {
+                                              updateSceneDialogueMeta(scene.id, sd.id, {
                                                 se_id: e.target.value || null,
                                               })
                                             }
@@ -531,7 +554,7 @@ export default function StoryboardPage() {
                                                 step={0.05}
                                                 value={seVol}
                                                 onChange={(e) =>
-                                                  updateSceneDialogueSe(scene.id, sd.id, {
+                                                  updateSceneDialogueMeta(scene.id, sd.id, {
                                                     se_volume: Number(e.target.value),
                                                   })
                                                 }
@@ -543,6 +566,75 @@ export default function StoryboardPage() {
                                               </span>
                                             </>
                                           )}
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-xs text-muted-foreground flex-shrink-0">立ち位置</span>
+                                          <div className="flex gap-1">
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateSceneDialogueMeta(scene.id, sd.id, { character_x: 0.25 })
+                                              }
+                                              className={presetBtn(posPreset === 'left')}
+                                              title="左"
+                                            >
+                                              左
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateSceneDialogueMeta(scene.id, sd.id, { character_x: 0.5 })
+                                              }
+                                              className={presetBtn(posPreset === 'center')}
+                                              title="中央"
+                                            >
+                                              中
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateSceneDialogueMeta(scene.id, sd.id, { character_x: 0.75 })
+                                              }
+                                              className={presetBtn(posPreset === 'right')}
+                                              title="右"
+                                            >
+                                              右
+                                            </button>
+                                          </div>
+                                          <span className="text-muted-foreground text-xs flex-shrink-0">|</span>
+                                          <span className="text-xs text-muted-foreground flex-shrink-0">サイズ</span>
+                                          <div className="flex gap-1">
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateSceneDialogueMeta(scene.id, sd.id, { character_scale: 0.55 })
+                                              }
+                                              className={presetBtn(sizePreset === 'small')}
+                                              title="小さめ"
+                                            >
+                                              小
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateSceneDialogueMeta(scene.id, sd.id, { character_scale: 0.8 })
+                                              }
+                                              className={presetBtn(sizePreset === 'medium')}
+                                              title="普通"
+                                            >
+                                              中
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateSceneDialogueMeta(scene.id, sd.id, { character_scale: 1.0 })
+                                              }
+                                              className={presetBtn(sizePreset === 'large')}
+                                              title="大きめ(画面いっぱい)"
+                                            >
+                                              大
+                                            </button>
+                                          </div>
                                         </div>
                                       </div>
                                     )
@@ -715,6 +807,8 @@ interface SceneDialogueResolved {
   charExpressions: CharacterExpression[]
   se: SoundEffect | null
   seVolume: number
+  characterX: number
+  characterScale: number
 }
 
 function ScenePlayerDialog({
@@ -792,6 +886,8 @@ function ScenePlayerDialog({
         : []
       const se = sd.se_id ? sounds.find((s) => s.id === sd.se_id) ?? null : null
       const seVolume = typeof sd.se_volume === 'number' ? sd.se_volume : 1
+      const characterX = typeof sd.character_x === 'number' ? sd.character_x : 0.5
+      const characterScale = typeof sd.character_scale === 'number' ? sd.character_scale : 1.0
       return {
         text: d.text,
         character,
@@ -800,6 +896,8 @@ function ScenePlayerDialog({
         charExpressions,
         se,
         seVolume,
+        characterX,
+        characterScale,
       } satisfies SceneDialogueResolved
     })
     .filter((x): x is SceneDialogueResolved => x !== null && x.audio !== null && x.character !== null)
@@ -854,6 +952,8 @@ function ScenePlayerDialog({
                 caption={current?.text ?? null}
                 telopStyle={telopStyle}
                 backgroundLayers={backgroundLayers}
+                characterX={current?.characterX ?? 0.5}
+                characterScale={current?.characterScale ?? 1.0}
                 playing={playing}
                 onEnded={handleEnded}
               />
