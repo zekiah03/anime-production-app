@@ -33,12 +33,16 @@ export interface AudioFile {
   created_at: string
 }
 
+export type CharacterPosition = 'left' | 'center' | 'right'
+
 export interface Dialogue {
   id: string
   text: string
   character_id: string | null
   audio_id: string | null
   expression_id: string | null // プレビュー時の表情指定
+  position: CharacterPosition | null // 立ち位置(null は center 扱い)
+  scale: number | null // 拡大率(null は 1.0 扱い)
   emotion: string | null
   notes: string | null
   created_at: string

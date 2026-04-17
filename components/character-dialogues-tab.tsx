@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Play, Plus, Square, Trash2, Edit2, Music, Sparkles } from 'lucide-react'
-import type { AudioFile, Character, CharacterExpression, Dialogue } from '@/types/db'
+import type { AudioFile, Character, CharacterExpression, CharacterPosition, Dialogue } from '@/types/db'
 import { deleteDialogue, saveDialogue } from '@/lib/db'
 import { LipSyncStage } from '@/components/lip-sync-stage'
 
@@ -32,6 +32,8 @@ export function CharacterDialoguesTab({
     text: '',
     audio_id: '',
     expression_id: '',
+    position: 'center' as CharacterPosition,
+    scale: 1,
     emotion: '',
     notes: '',
   })
@@ -39,7 +41,15 @@ export function CharacterDialoguesTab({
   const expressionOptions = expressions.filter((e) => e.kind === 'expression')
 
   function resetForm() {
-    setFormData({ text: '', audio_id: '', expression_id: '', emotion: '', notes: '' })
+    setFormData({
+      text: '',
+      audio_id: '',
+      expression_id: '',
+      position: 'center',
+      scale: 1,
+      emotion: '',
+      notes: '',
+    })
     setEditingId(null)
     setShowForm(false)
   }
@@ -58,6 +68,8 @@ export function CharacterDialoguesTab({
         character_id: character.id,
         audio_id: formData.audio_id || null,
         expression_id: formData.expression_id || null,
+        position: formData.position,
+        scale: formData.scale,
         emotion: formData.emotion || null,
         notes: formData.notes || null,
         updated_at: now,
@@ -71,6 +83,8 @@ export function CharacterDialoguesTab({
         character_id: character.id,
         audio_id: formData.audio_id || null,
         expression_id: formData.expression_id || null,
+        position: formData.position,
+        scale: formData.scale,
         emotion: formData.emotion || null,
         notes: formData.notes || null,
         created_at: now,
@@ -93,6 +107,8 @@ export function CharacterDialoguesTab({
       text: d.text,
       audio_id: d.audio_id || '',
       expression_id: d.expression_id || '',
+      position: d.position ?? 'center',
+      scale: d.scale ?? 1,
       emotion: d.emotion || '',
       notes: d.notes || '',
     })
@@ -177,6 +193,36 @@ export function CharacterDialoguesTab({
                   </option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">立ち位置</label>
+              <select
+                value={formData.position}
+                onChange={(e) =>
+                  setFormData({ ...formData, position: e.target.value as CharacterPosition })
+                }
+                className="w-full px-3 py-2 bg-background border border-input rounded-md text-sm"
+              >
+                <option value="left">左</option>
+                <option value="center">中央</option>
+                <option value="right">右</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-muted-foreground mb-1">
+                サイズ ({Math.round(formData.scale * 100)}%)
+              </label>
+              <input
+                type="range"
+                min={0.4}
+                max={1.4}
+                step={0.05}
+                value={formData.scale}
+                onChange={(e) =>
+                  setFormData({ ...formData, scale: Number(e.target.value) })
+                }
+                className="w-full accent-primary"
+              />
             </div>
             <div>
               <label className="block text-xs text-muted-foreground mb-1">メモ</label>
@@ -269,6 +315,8 @@ export function CharacterDialoguesTab({
                       audioUrl={audio?.file_url ?? null}
                       overrideExpressionId={d.expression_id}
                       caption={d.text}
+                      position={d.position ?? 'center'}
+                      scale={d.scale ?? 1}
                       playing={isPlaying}
                       onEnded={() => setPlayingId(null)}
                     />

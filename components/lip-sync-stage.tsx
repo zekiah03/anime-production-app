@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Users } from 'lucide-react'
-import type { Character, CharacterExpression, Layer } from '@/types/db'
+import type { Character, CharacterExpression, CharacterPosition, Layer } from '@/types/db'
 
 interface LipSyncStageProps {
   character: Character | null
@@ -14,6 +14,8 @@ interface LipSyncStageProps {
   caption?: string | null
   // 背景レイヤー(order_index 昇順、可視のみ)。キャラ画像の後ろに重ねる。
   backgroundLayers?: Layer[]
+  position?: CharacterPosition
+  scale?: number
   onEnded?: () => void
   className?: string
 }
@@ -29,6 +31,8 @@ export function LipSyncStage({
   playing,
   caption,
   backgroundLayers,
+  position = 'center',
+  scale = 1,
   onEnded,
   className,
 }: LipSyncStageProps) {
@@ -196,13 +200,23 @@ export function LipSyncStage({
         />
       ))}
       {img ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          key={img}
-          src={img}
-          alt={character?.name ?? ''}
-          className="relative w-full h-full object-contain"
-        />
+        // 立ち位置 = 横方向のオフセット, scale = サイズ。立ち絵想定で下端 anchor。
+        <div
+          className="absolute inset-y-0 flex items-end justify-center"
+          style={{
+            left: position === 'left' ? '0%' : position === 'right' ? '50%' : '25%',
+            width: '50%',
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            key={img}
+            src={img}
+            alt={character?.name ?? ''}
+            className="max-h-full max-w-full object-contain"
+            style={{ transform: `scale(${scale})`, transformOrigin: 'bottom center' }}
+          />
+        </div>
       ) : (
         <div className="relative text-center text-muted-foreground p-4">
           <Users size={32} className="mx-auto mb-2" />

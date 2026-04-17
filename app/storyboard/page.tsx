@@ -520,6 +520,8 @@ interface SceneDialogueResolved {
   character: Character | null
   audio: AudioFile | null
   expressionId: string | null
+  position: 'left' | 'center' | 'right'
+  scale: number
   charExpressions: CharacterExpression[]
 }
 
@@ -564,6 +566,8 @@ function ScenePlayerDialog({
         character,
         audio,
         expressionId: d.expression_id,
+        position: d.position ?? 'center',
+        scale: d.scale ?? 1,
         charExpressions,
       } satisfies SceneDialogueResolved
     })
@@ -618,6 +622,8 @@ function ScenePlayerDialog({
                 overrideExpressionId={current?.expressionId ?? null}
                 caption={current?.text ?? null}
                 backgroundLayers={backgroundLayers}
+                position={current?.position ?? 'center'}
+                scale={current?.scale ?? 1}
                 playing={playing}
                 onEnded={handleEnded}
               />

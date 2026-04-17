@@ -26,6 +26,8 @@ interface ResolvedDialogue {
   mouthClosed: CharacterExpression | null
   blink: CharacterExpression | null
   override: CharacterExpression | null
+  position: 'left' | 'center' | 'right'
+  scale: number
 }
 
 // 書き出し解像度は縦型ショート動画を意識した 9:16。将来 UI で切替可能にしてもよい。
@@ -80,6 +82,8 @@ export function SceneExportDialog({
             override: d.expression_id
               ? charExpressions.find((x) => x.id === d.expression_id) ?? null
               : null,
+            position: d.position ?? 'center',
+            scale: d.scale ?? 1,
           } as ResolvedDialogue
         })
         .filter((x): x is ResolvedDialogue => x !== null)
@@ -152,11 +156,20 @@ export function SceneExportDialog({
     if (imgUrl) {
       const img = cache.get(imgUrl)
       if (img) {
-        const scale = Math.min(WIDTH / img.width, HEIGHT / img.height)
-        const w = img.width * scale
-        const h = img.height * scale
-        const x = (WIDTH - w) / 2
-        const y = (HEIGHT - h) / 2
+        // contain でキャンバスに収める基準サイズを出してから position と scale を適用。
+        // 立ち絵は下端 anchor、X はゾーン(left/center/right)の中心。
+        const baseScale = Math.min(WIDTH / img.width, HEIGHT / img.height)
+        const finalScale = baseScale * current.scale
+        const w = img.width * finalScale
+        const h = img.height * finalScale
+        const zoneCenterX =
+          current.position === 'left'
+            ? WIDTH * 0.25
+            : current.position === 'right'
+              ? WIDTH * 0.75
+              : WIDTH * 0.5
+        const x = zoneCenterX - w / 2
+        const y = HEIGHT - h
         ctx.drawImage(img, x, y, w, h)
       }
     }
