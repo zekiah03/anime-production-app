@@ -15,6 +15,8 @@ import { charColorHsl } from '@/lib/char-color'
 import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
+  clearStore,
+  STORE_NAMES,
   deleteBgmTrack,
   deleteCastPreset,
   deleteIllustration,
@@ -128,6 +130,11 @@ export default function StoryboardPage() {
   const [playingVideoSceneIdx, setPlayingVideoSceneIdx] = useState(0)
   // 未使用アセット掃除ダイアログ
   const [showCleanup, setShowCleanup] = useState(false)
+  // キャラ別セリフ一覧ダイアログ
+  const [charLinesViewId, setCharLinesViewId] = useState<string | null>(null)
+  // 全データリセット確認
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const [resetInput, setResetInput] = useState('')
   // ナレーション追加フォーム(展開中のシーンに対して使う)
   const [narrationText, setNarrationText] = useState('')
   const [narrationAudioId, setNarrationAudioId] = useState('')
@@ -1593,6 +1600,36 @@ export default function StoryboardPage() {
     })
   }
 
+  // 全データリセット: 全ストアを空にしてメモリ state もクリア
+  async function handleFullReset() {
+    if (resetInput !== 'reset') return
+    for (const name of STORE_NAMES) {
+      try {
+        await clearStore(name)
+      } catch (e) {
+        console.error('[anime-app] clear store failed', name, e)
+      }
+    }
+    setScenes([])
+    setDialogues([])
+    setCharacters([])
+    setAudioFiles([])
+    setExpressions([])
+    setIllustrations([])
+    setBgmTracks([])
+    setSounds([])
+    setCast([])
+    setVideos([])
+    setCastPresets([])
+    setSelectedVideoId(null)
+    setSelectedSceneId(null)
+    setCheckedSceneIds(new Set())
+    setTelopStyle(DEFAULT_TELOP_STYLE)
+    setShowResetConfirm(false)
+    setResetInput('')
+    alert('すべてのデータを初期化しました')
+  }
+
   // 使われていないアセットを算出(他エンティティからの参照がないもの)
   function computeUnusedAssets() {
     const usedBg = new Set<string>()
@@ -1878,6 +1915,26 @@ export default function StoryboardPage() {
                 title="どのシーンからも参照されていない背景/BGM/SE を見つけて一括削除"
               >
                 未使用掃除
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setCharLinesViewId(characters[0]?.id ?? null)}
+                className="gap-2"
+                title="選んだキャラの全セリフをシーン横断で一覧表示"
+                disabled={characters.length === 0}
+              >
+                セリフ一覧
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setResetInput('')
+                  setShowResetConfirm(true)
+                }}
+                className="gap-2 text-destructive border-destructive/40 hover:bg-destructive/10"
+                title="全データを削除して初期状態に戻す(危険)"
+              >
+                全リセット
               </Button>
               <Button
                 variant="outline"
@@ -2500,11 +2557,23 @@ export default function StoryboardPage() {
                             }
                             className="w-full text-left cursor-pointer block"
                           >
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-sm font-semibold text-muted-foreground bg-primary/20 px-2 py-1 rounded">
                                 #{index + 1}
                               </span>
                               <h4 className="font-semibold text-foreground">{scene.title}</h4>
+                              {(() => {
+                                const totalSec = buildTimelineClips(scene).reduce(
+                                  (sum, c) => sum + c.durationSec,
+                                  0,
+                                )
+                                if (totalSec <= 0) return null
+                                return (
+                                  <span className="text-xs text-muted-foreground tabular-nums bg-background border border-border rounded px-1.5 py-0.5">
+                                    {totalSec.toFixed(1)}秒
+                                  </span>
+                                )
+                              })()}
                             </div>
                             {scene.description && (
                               <p className="text-sm text-muted-foreground mt-1">{scene.description}</p>
@@ -4035,6 +4104,178 @@ export default function StoryboardPage() {
                     </div>
                   )
                 })()}
+              </DialogContent>
+            </Dialog>
+            {/* キャラ別セリフ一覧 */}
+            <Dialog
+              open={!!charLinesViewId}
+              onOpenChange={(o) => !o && setCharLinesViewId(null)}
+            >
+              <DialogContent className="max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>キャラ別セリフ一覧</DialogTitle>
+                  <DialogDescription>
+                    シーンを横断して、選んだキャラのセリフをすべて確認できます。
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {characters.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setCharLinesViewId(c.id)}
+                        className={`px-2 py-1 text-xs rounded border transition ${
+                          charLinesViewId === c.id
+                            ? 'bg-primary/20 border-primary/40 text-primary font-medium'
+                            : 'bg-card border-input text-foreground hover:bg-primary/10'
+                        }`}
+                        style={{
+                          borderLeft: `4px solid ${charColorHsl(c.id)}`,
+                        }}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
+                  {(() => {
+                    if (!charLinesViewId) return null
+                    const char = characters.find((c) => c.id === charLinesViewId)
+                    if (!char) return null
+                    type Row = {
+                      sdId: string
+                      sceneTitle: string
+                      sceneIdx: number
+                      videoName: string
+                      text: string
+                      sceneId: string
+                    }
+                    const rows: Row[] = []
+                    const orderedVideos = [...videos].sort(
+                      (a, b) => a.order_index - b.order_index,
+                    )
+                    for (const v of orderedVideos) {
+                      const vs = scenes
+                        .filter((s) => (s.video_id ?? null) === v.id)
+                        .sort((a, b) => a.order_index - b.order_index)
+                      vs.forEach((s, sidx) => {
+                        for (const sd of s.dialogues) {
+                          if (sd.dialogue?.character_id === char.id) {
+                            rows.push({
+                              sdId: sd.id,
+                              sceneTitle: s.title ?? '(無題)',
+                              sceneIdx: sidx,
+                              videoName: v.name,
+                              text: sd.dialogue.text,
+                              sceneId: s.id,
+                            })
+                          }
+                        }
+                      })
+                    }
+                    const uncatScenes = scenes
+                      .filter((s) => (s.video_id ?? null) === null)
+                      .sort((a, b) => a.order_index - b.order_index)
+                    uncatScenes.forEach((s, sidx) => {
+                      for (const sd of s.dialogues) {
+                        if (sd.dialogue?.character_id === char.id) {
+                          rows.push({
+                            sdId: sd.id,
+                            sceneTitle: s.title ?? '(無題)',
+                            sceneIdx: sidx,
+                            videoName: '未分類',
+                            text: sd.dialogue.text,
+                            sceneId: s.id,
+                          })
+                        }
+                      }
+                    })
+                    return (
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-2">
+                          {char.name} のセリフ: {rows.length} 件
+                        </p>
+                        <div className="max-h-96 overflow-y-auto space-y-1 border border-border rounded p-2">
+                          {rows.length === 0 ? (
+                            <p className="text-sm text-muted-foreground text-center py-4">
+                              セリフがありません
+                            </p>
+                          ) : (
+                            rows.map((r) => (
+                              <button
+                                key={r.sdId}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedSceneId(r.sceneId)
+                                  setCharLinesViewId(null)
+                                }}
+                                className="w-full text-left p-2 bg-background rounded hover:bg-primary/10 transition"
+                                title="このセリフのシーンを展開"
+                              >
+                                <div className="text-[10px] text-muted-foreground flex items-center gap-2">
+                                  <span className="tabular-nums">
+                                    {r.videoName} #{r.sceneIdx + 1}
+                                  </span>
+                                  <span className="truncate">{r.sceneTitle}</span>
+                                </div>
+                                <div className="text-sm text-foreground mt-1 break-words">
+                                  {r.text}
+                                </div>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </div>
+              </DialogContent>
+            </Dialog>
+            {/* 全データリセット */}
+            <Dialog
+              open={showResetConfirm}
+              onOpenChange={(o) => {
+                setShowResetConfirm(o)
+                if (!o) setResetInput('')
+              }}
+            >
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="text-destructive">
+                    すべてのデータを削除
+                  </DialogTitle>
+                  <DialogDescription>
+                    動画・シーン・セリフ・キャラ・音声・画像・BGM・SE、そしてテロップ設定を含む
+                    IndexedDB 内の全データを削除します。この操作は取り消せません。
+                    続行するには下に「reset」と入力してください。
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <Input
+                    type="text"
+                    value={resetInput}
+                    onChange={(e) => setResetInput(e.target.value)}
+                    placeholder="reset"
+                    className="bg-background border-destructive/40"
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowResetConfirm(false)}
+                    >
+                      キャンセル
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleFullReset}
+                      disabled={resetInput !== 'reset'}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/80"
+                    >
+                      完全に削除
+                    </Button>
+                  </div>
+                </div>
               </DialogContent>
             </Dialog>
             {/* キャラ一括置換 */}
