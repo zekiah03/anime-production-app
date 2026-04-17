@@ -15,9 +15,11 @@ import { useToast } from '@/components/toast'
 import { useSaveStatus, SaveStatusBadge } from '@/components/save-status'
 import { StorageBadge } from '@/components/storage-badge'
 import { StoryboardEmptyState } from '@/components/empty-state'
+import { SceneCardSkeleton } from '@/components/skeleton'
 import { resetFirstTimeTour } from '@/components/first-time-tour'
+import { SCENE_COLORS, sceneColorFor } from '@/lib/scene-colors'
 import { charColorHsl } from '@/lib/char-color'
-import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset } from '@/types/db'
+import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset, SceneColorTag } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
   clearStore,
@@ -2034,7 +2036,7 @@ export default function StoryboardPage() {
   // シーンの title / description をその場で更新
   async function handleUpdateSceneFields(
     sceneId: string,
-    patch: Partial<Pick<Scene, 'title' | 'description'>>,
+    patch: Partial<Pick<Scene, 'title' | 'description' | 'color_tag'>>,
   ) {
     const existing = scenes.find((s) => s.id === sceneId)
     if (!existing) return
@@ -2048,6 +2050,8 @@ export default function StoryboardPage() {
       bgm_track_id: existing.bgm_track_id,
       bgm_volume: existing.bgm_volume,
       video_id: existing.video_id ?? null,
+      color_tag:
+        patch.color_tag !== undefined ? patch.color_tag : existing.color_tag ?? null,
       order_index: existing.order_index,
       created_at: existing.created_at,
       updated_at: now,
@@ -2807,8 +2811,10 @@ export default function StoryboardPage() {
               )}
 
               {loading ? (
-                <div className="text-center py-12">
-                  <p className="text-muted-foreground">読み込み中...</p>
+                <div className="space-y-3">
+                  <SceneCardSkeleton />
+                  <SceneCardSkeleton />
+                  <SceneCardSkeleton />
                 </div>
               ) : (() => {
                 const q = searchQuery.trim().toLowerCase()
@@ -2870,6 +2876,13 @@ export default function StoryboardPage() {
                         }
                       }}
                       className="bg-card border-border p-4 hover:border-primary/50 transition cursor-move"
+                      style={
+                        scene.color_tag
+                          ? {
+                              borderLeft: `4px solid ${sceneColorFor(scene.color_tag)?.hsl ?? 'transparent'}`,
+                            }
+                          : undefined
+                      }
                     >
                       <div className="flex items-start gap-4">
                         <label
@@ -2980,7 +2993,7 @@ export default function StoryboardPage() {
                                   </button>
                                 </div>
                               )}
-                              {/* タイトル / 説明をその場で編集 */}
+                              {/* タイトル / 説明 / カラータグをその場で編集 */}
                               <div className="space-y-2">
                                 <div>
                                   <label className="block text-[10px] font-medium text-muted-foreground mb-1">
@@ -2994,6 +3007,42 @@ export default function StoryboardPage() {
                                     }
                                     className="bg-background border-input h-8 text-sm"
                                   />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-medium text-muted-foreground mb-1">
+                                    カラータグ
+                                  </label>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleUpdateSceneFields(scene.id, { color_tag: null })
+                                      }
+                                      className={`h-6 w-6 rounded-full border-2 transition ${
+                                        !scene.color_tag
+                                          ? 'border-primary ring-2 ring-primary/30'
+                                          : 'border-input hover:border-primary/50'
+                                      }`}
+                                      style={{ background: 'transparent' }}
+                                      title="タグなし"
+                                    />
+                                    {SCENE_COLORS.map((c) => (
+                                      <button
+                                        key={c.tag}
+                                        type="button"
+                                        onClick={() =>
+                                          handleUpdateSceneFields(scene.id, { color_tag: c.tag })
+                                        }
+                                        className={`h-6 w-6 rounded-full border-2 transition ${
+                                          scene.color_tag === c.tag
+                                            ? 'border-primary ring-2 ring-primary/30'
+                                            : 'border-transparent hover:border-foreground/30'
+                                        }`}
+                                        style={{ background: c.hsl }}
+                                        title={c.label}
+                                      />
+                                    ))}
+                                  </div>
                                 </div>
                                 <div>
                                   <label className="block text-[10px] font-medium text-muted-foreground mb-1">

@@ -38,6 +38,7 @@ import {
   saveSoundEffect,
 } from '@/lib/db'
 import { Sidebar } from '@/components/sidebar'
+import { ListSkeleton } from '@/components/skeleton'
 
 // 「環境」タブ: 背景・小物など、キャラに依存しない素材を管理する。
 // 内部的には Illustration/Layer エンティティをそのまま使う(背景イラストなどが既に入っているかもしれないため)。
@@ -645,9 +646,7 @@ export default function EnvironmentPage() {
                 />
 
                 {loading ? (
-                  <div className="text-center py-8 text-sm text-muted-foreground">
-                    読み込み中...
-                  </div>
+                  <ListSkeleton rows={3} />
                 ) : filteredIllustrations.length === 0 ? (
                   <div className="text-center py-8 text-sm text-muted-foreground">
                     {imgSearch ? '該当する素材がありません' : '素材がまだありません'}
@@ -926,9 +925,7 @@ export default function EnvironmentPage() {
                 />
 
                 {bgmLoading ? (
-                  <div className="text-center py-8 text-sm text-muted-foreground">
-                    読み込み中...
-                  </div>
+                  <ListSkeleton rows={3} />
                 ) : filteredBgm.length === 0 ? (
                   <div className="text-center py-10 text-sm text-muted-foreground">
                     <Music size={32} className="mx-auto mb-2 opacity-50" />
@@ -1032,9 +1029,7 @@ export default function EnvironmentPage() {
                 />
 
                 {seLoading ? (
-                  <div className="text-center py-8 text-sm text-muted-foreground">
-                    読み込み中...
-                  </div>
+                  <ListSkeleton rows={3} />
                 ) : filteredSe.length === 0 ? (
                   <div className="text-center py-10 text-sm text-muted-foreground">
                     <Zap size={32} className="mx-auto mb-2 opacity-50" />

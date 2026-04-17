@@ -38,6 +38,11 @@ import { LipSyncStage } from '@/components/lip-sync-stage'
 import { Sidebar } from '@/components/sidebar'
 import { CharacterAudioTab } from '@/components/character-audio-tab'
 import { CharacterDialoguesTab } from '@/components/character-dialogues-tab'
+import {
+  extractImageFromPasteEvent,
+  readImageFromClipboard,
+} from '@/lib/clipboard-image'
+import { CharacterCardSkeleton } from '@/components/skeleton'
 
 const KIND_LABEL: Record<ExpressionKind, string> = {
   mouth_closed: '口閉じ',
@@ -137,9 +142,7 @@ export default function CharactersPage() {
     setShowForm(true)
   }
 
-  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+  function acceptImageFile(file: File) {
     if (formData.imagePreview) URL.revokeObjectURL(formData.imagePreview)
     setFormData((prev) => ({
       ...prev,
@@ -147,6 +150,39 @@ export default function CharactersPage() {
       imagePreview: URL.createObjectURL(file),
     }))
   }
+
+  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    acceptImageFile(file)
+  }
+
+  // フォーム表示中はキーボードからの貼付を受け付ける
+  useEffect(() => {
+    if (!showForm) return
+    const handler = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null
+      // 入力欄内でのテキスト貼付は邪魔しない
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        // ただしファイル画像が含まれる場合だけ拾う
+        const file = extractImageFromPasteEvent(e)
+        if (!file) return
+      }
+      const file = extractImageFromPasteEvent(e)
+      if (file) {
+        e.preventDefault()
+        acceptImageFile(file)
+      }
+    }
+    document.addEventListener('paste', handler)
+    return () => document.removeEventListener('paste', handler)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showForm])
 
   const detailChar = detailId ? characters.find((c) => c.id === detailId) ?? null : null
 
@@ -217,6 +253,17 @@ export default function CharactersPage() {
                         className="hidden"
                       />
                     </label>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const file = await readImageFromClipboard()
+                        if (file) acceptImageFile(file)
+                      }}
+                      className="inline-flex items-center gap-2 px-3 py-2 bg-background border border-input rounded-md text-sm hover:bg-accent/20 transition"
+                      title="クリップボードに画像がある場合に貼付(Ctrl+V でも可)"
+                    >
+                      クリップボードから貼付
+                    </button>
                     {formData.imagePreview && (
                       <img
                         src={formData.imagePreview}
@@ -242,8 +289,10 @@ export default function CharactersPage() {
           )}
 
           {loading ? (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">読み込み中...</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <CharacterCardSkeleton />
+              <CharacterCardSkeleton />
+              <CharacterCardSkeleton />
             </div>
           ) : characters.length === 0 ? (
             <Card className="bg-card border-border p-12 text-center">

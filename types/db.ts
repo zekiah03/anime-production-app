@@ -102,9 +102,21 @@ export interface Scene {
   // 所属する動画(未指定なら「未分類」扱い)
   video_id?: string | null
   order_index: number
+  // 視覚的グルーピング用のカラータグ(7 色パレット名 or null)
+  color_tag?: SceneColorTag | null
   created_at: string
   updated_at: string
 }
+
+// シーンカラータグ: 意味は付けず、視覚的区別だけのために使う
+export type SceneColorTag =
+  | 'red'
+  | 'orange'
+  | 'yellow'
+  | 'green'
+  | 'blue'
+  | 'purple'
+  | 'gray'
 
 // シーンの入れ物。複数本の動画をこのアプリ1つで作り分けるために使う。
 export interface Video {
