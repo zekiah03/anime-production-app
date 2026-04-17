@@ -825,6 +825,33 @@ export function VideoExportDialog({
         ) : (
           <div className="space-y-4">
             <div className="space-y-3 p-3 bg-background border border-border rounded-md">
+              {/* クイック設定プリセット(投稿先ごと) */}
+              <div className="flex items-center gap-1 flex-wrap">
+                <span className="text-xs text-muted-foreground mr-1">プリセット:</span>
+                {(
+                  [
+                    { label: 'Shorts/Reels', f: 'mp4', a: '9:16', q: '1080p' },
+                    { label: 'X (Twitter)', f: 'mp4', a: '16:9', q: '720p' },
+                    { label: 'YouTube', f: 'mp4', a: '16:9', q: '1080p' },
+                    { label: 'Instagram正方', f: 'mp4', a: '1:1', q: '1080p' },
+                  ] as const
+                ).map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    disabled={status !== 'idle'}
+                    onClick={() => {
+                      setFormat(p.f as Format)
+                      setAspect(p.a as Aspect)
+                      setQuality(p.q as Quality)
+                    }}
+                    className="px-2 py-1 text-xs rounded border border-input text-muted-foreground hover:bg-primary/10 hover:text-primary disabled:opacity-50 transition"
+                    title={`${p.f} / ${p.a} / ${p.q}`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-foreground mb-1">出力形式</label>

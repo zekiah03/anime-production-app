@@ -89,6 +89,12 @@ export default function StoryboardPage() {
   const [checkedSceneIds, setCheckedSceneIds] = useState<Set<string>>(new Set())
   // 全シーン展開モード(全部の展開パネルを開く)
   const [allExpanded, setAllExpanded] = useState(false)
+  // BGM一括変更ダイアログ
+  const [showBulkBgm, setShowBulkBgm] = useState(false)
+  const [bulkBgmId, setBulkBgmId] = useState('')
+  const [bulkBgmVolume, setBulkBgmVolume] = useState(0.25)
+  // 検索入力の ref(キーボードショートカット用)
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
   const [telopStyle, setTelopStyle] = useState<TelopStyle>(DEFAULT_TELOP_STYLE)
   const [showTelopSettings, setShowTelopSettings] = useState(false)
   // ナレーション追加フォーム(展開中のシーンに対して使う)
@@ -652,6 +658,84 @@ export default function StoryboardPage() {
     }
     clearChecked()
   }
+
+  // 現在の動画の全シーンに対して BGM を一括適用
+  async function handleApplyBulkBgm() {
+    const targetScenes = scenes.filter((s) => (s.video_id ?? null) === selectedVideoId)
+    if (targetScenes.length === 0) {
+      setShowBulkBgm(false)
+      return
+    }
+    const newBgmId = bulkBgmId || null
+    const now = new Date().toISOString()
+    for (const scene of targetScenes) {
+      const updated: Scene = {
+        id: scene.id,
+        title: scene.title,
+        description: scene.description,
+        background_illustration_id: scene.background_illustration_id,
+        bgm_track_id: newBgmId,
+        bgm_volume: bulkBgmVolume,
+        video_id: scene.video_id ?? null,
+        order_index: scene.order_index,
+        created_at: scene.created_at,
+        updated_at: now,
+      }
+      await saveScene(updated)
+    }
+    setScenes((prev) =>
+      prev.map((s) =>
+        (s.video_id ?? null) === selectedVideoId
+          ? { ...s, bgm_track_id: newBgmId, bgm_volume: bulkBgmVolume, updated_at: now }
+          : s,
+      ),
+    )
+    setShowBulkBgm(false)
+  }
+
+  // キーボードショートカット: Esc / / / Delete
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const isTyping =
+        !!target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      if (e.key === 'Escape') {
+        // テキスト入力中でも Esc で選択解除したいことが多いので許容
+        if (checkedSceneIds.size > 0) {
+          e.preventDefault()
+          clearChecked()
+          return
+        }
+        if (allExpanded) {
+          e.preventDefault()
+          setAllExpanded(false)
+          return
+        }
+        if (selectedSceneId) {
+          e.preventDefault()
+          setSelectedSceneId(null)
+          return
+        }
+      }
+      if (isTyping) return
+      if (e.key === '/') {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (checkedSceneIds.size > 0) {
+          e.preventDefault()
+          handleBulkDelete()
+        }
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkedSceneIds, allExpanded, selectedSceneId])
 
   // ナレーション(character_id=null の Dialogue)を新規作成してシーンに追加する
   async function handleAddNarration(sceneId: string) {
@@ -1226,7 +1310,31 @@ export default function StoryboardPage() {
             <div className="lg:col-span-2">
               <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
                 <h3 className="text-xl font-semibold text-foreground">シーン</h3>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 flex-wrap">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      // 既定値を現在の先頭シーンから拾う
+                      const firstScene = scenes.find(
+                        (s) => (s.video_id ?? null) === selectedVideoId,
+                      )
+                      setBulkBgmId(firstScene?.bgm_track_id ?? '')
+                      setBulkBgmVolume(
+                        typeof firstScene?.bgm_volume === 'number'
+                          ? firstScene.bgm_volume
+                          : 0.25,
+                      )
+                      setShowBulkBgm(true)
+                    }}
+                    disabled={
+                      scenes.filter((s) => (s.video_id ?? null) === selectedVideoId).length === 0
+                    }
+                    className="gap-1 h-7 px-2 text-xs"
+                    title="この動画の全シーンのBGMを一括変更"
+                  >
+                    BGM一括
+                  </Button>
                   <Button
                     size="sm"
                     variant="outline"
@@ -1261,8 +1369,9 @@ export default function StoryboardPage() {
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
                   <input
+                    ref={searchInputRef}
                     type="text"
-                    placeholder="セリフ・シーンタイトルを検索"
+                    placeholder="セリフ・シーンタイトルを検索(/で即フォーカス)"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-9 pr-9 py-2 bg-background border border-input rounded-md text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
@@ -2250,6 +2359,65 @@ export default function StoryboardPage() {
               }}
               onClose={() => setShowTelopSettings(false)}
             />
+            {/* BGM 一括変更ダイアログ */}
+            <Dialog open={showBulkBgm} onOpenChange={(o) => !o && setShowBulkBgm(false)}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>
+                    BGM 一括変更(
+                    {videos.find((v) => v.id === selectedVideoId)?.name ?? ''})
+                  </DialogTitle>
+                  <DialogDescription>
+                    この動画内の全シーン(
+                    {
+                      scenes.filter((s) => (s.video_id ?? null) === selectedVideoId).length
+                    }
+                    シーン)の BGM を一括で置き換えます。シーンの他の設定は変わりません。
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">
+                      BGM
+                    </label>
+                    <select
+                      value={bulkBgmId}
+                      onChange={(e) => setBulkBgmId(e.target.value)}
+                      className="w-full px-3 py-2 bg-background border border-input rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">なし(BGM を外す)</option>
+                      {bgmTracks.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {bulkBgmId && (
+                    <div>
+                      <label className="block text-sm font-medium text-foreground mb-1">
+                        音量: {Math.round(bulkBgmVolume * 100)}%
+                      </label>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={bulkBgmVolume}
+                        onChange={(e) => setBulkBgmVolume(Number(e.target.value))}
+                        className="w-full accent-primary"
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="outline" onClick={() => setShowBulkBgm(false)}>
+                    キャンセル
+                  </Button>
+                  <Button onClick={handleApplyBulkBgm}>適用</Button>
+                </div>
+              </DialogContent>
+            </Dialog>
             <VideoExportDialog
               videoName={videos.find((v) => v.id === exportingVideoId)?.name ?? '動画'}
               scenes={scenes
