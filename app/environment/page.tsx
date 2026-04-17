@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Plus,
   Trash2,
@@ -14,13 +15,17 @@ import {
   Layers,
   Upload,
   Image as ImageIcon,
+  Music,
 } from 'lucide-react'
-import type { IllustrationWithLayers, Layer, Illustration } from '@/types/db'
+import type { BgmTrack, IllustrationWithLayers, Layer, Illustration } from '@/types/db'
 import {
+  deleteBgmTrack,
   deleteIllustration,
   deleteLayer,
+  getAllBgmTracks,
   getAllIllustrations,
   getLayersByIllustration,
+  saveBgmTrack,
   saveIllustration,
   saveLayer,
   saveLayersBatch,
@@ -35,6 +40,11 @@ export default function EnvironmentPage() {
   const [newIllustrationName, setNewIllustrationName] = useState('')
   const [loading, setLoading] = useState(true)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  // BGM state
+  const [bgmTracks, setBgmTracks] = useState<BgmTrack[]>([])
+  const [bgmLoading, setBgmLoading] = useState(true)
+  const bgmInputRef = useRef<HTMLInputElement | null>(null)
 
   const selected = illustrations.find((i) => i.id === selectedId) ?? null
 
@@ -51,7 +61,83 @@ export default function EnvironmentPage() {
       })
       .catch((e) => console.error('[anime-app] load environment failed', e))
       .finally(() => setLoading(false))
+
+    getAllBgmTracks()
+      .then(setBgmTracks)
+      .catch((e) => console.error('[anime-app] load bgm failed', e))
+      .finally(() => setBgmLoading(false))
   }, [])
+
+  // ==================== BGM handlers ====================
+
+  function readAudioDuration(file: File): Promise<number | null> {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file)
+      const audio = new Audio()
+      audio.preload = 'metadata'
+      audio.src = url
+      const cleanup = () => {
+        URL.revokeObjectURL(url)
+        audio.src = ''
+      }
+      audio.onloadedmetadata = () => {
+        const d = Number.isFinite(audio.duration) ? audio.duration : null
+        cleanup()
+        resolve(d)
+      }
+      audio.onerror = () => {
+        cleanup()
+        resolve(null)
+      }
+    })
+  }
+
+  async function handleAddBgmFiles(files: FileList | null) {
+    if (!files || files.length === 0) return
+    const now = new Date().toISOString()
+    const newTracks: BgmTrack[] = []
+    for (const file of Array.from(files)) {
+      const duration = await readAudioDuration(file)
+      const track: BgmTrack = {
+        id: crypto.randomUUID(),
+        name: file.name.replace(/\.[^.]+$/, ''),
+        file_url: URL.createObjectURL(file),
+        file_blob: file,
+        duration,
+        created_at: now,
+      }
+      try {
+        await saveBgmTrack(track)
+        newTracks.push(track)
+      } catch (e) {
+        console.error('[anime-app] save bgm failed', e)
+      }
+    }
+    setBgmTracks((prev) => [...newTracks, ...prev])
+  }
+
+  async function handleDeleteBgm(id: string) {
+    if (!confirm('このBGMを削除してよろしいですか？(使用中のシーンからは自動で外れます)')) return
+    const target = bgmTracks.find((t) => t.id === id)
+    if (target?.file_url.startsWith('blob:')) URL.revokeObjectURL(target.file_url)
+    await deleteBgmTrack(id)
+    setBgmTracks((prev) => prev.filter((t) => t.id !== id))
+  }
+
+  async function handleRenameBgm(id: string, name: string) {
+    const existing = bgmTracks.find((t) => t.id === id)
+    if (!existing) return
+    const updated = { ...existing, name }
+    await saveBgmTrack(updated)
+    setBgmTracks((prev) => prev.map((t) => (t.id === id ? updated : t)))
+  }
+
+  function formatDuration(sec: number | null): string {
+    if (sec == null || !Number.isFinite(sec)) return '-'
+    const m = Math.floor(sec / 60)
+    const s = Math.floor(sec % 60)
+    return `${m}:${String(s).padStart(2, '0')}`
+  }
 
   async function handleCreateIllustration(e: React.FormEvent) {
     e.preventDefault()
@@ -212,10 +298,23 @@ export default function EnvironmentPage() {
           <div className="flex items-center justify-between mb-8">
             <div>
               <h2 className="text-3xl font-bold text-foreground">環境素材</h2>
-              <p className="text-muted-foreground mt-1">背景・小物などキャラ非依存の素材を管理(複数レイヤーで構成可)</p>
+              <p className="text-muted-foreground mt-1">背景・小物・BGM などキャラに依存しない素材を管理</p>
             </div>
           </div>
 
+          <Tabs defaultValue="images" className="w-full">
+            <TabsList>
+              <TabsTrigger value="images" className="gap-2">
+                <ImageIcon size={14} />
+                画像・背景
+              </TabsTrigger>
+              <TabsTrigger value="bgm" className="gap-2">
+                <Music size={14} />
+                BGM
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="images" className="mt-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div>
               <Card className="bg-card border-border p-6">
@@ -449,6 +548,85 @@ export default function EnvironmentPage() {
               )}
             </div>
           </div>
+            </TabsContent>
+
+            <TabsContent value="bgm" className="mt-6">
+              <Card className="bg-card border-border p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-foreground">BGMトラック</h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      シーンに割り当てると会話と並行して再生されます(ループ・音量調整あり)
+                    </p>
+                  </div>
+                  <div>
+                    <input
+                      ref={bgmInputRef}
+                      type="file"
+                      accept="audio/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        handleAddBgmFiles(e.target.files)
+                        if (bgmInputRef.current) bgmInputRef.current.value = ''
+                      }}
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => bgmInputRef.current?.click()}
+                      className="gap-1"
+                    >
+                      <Upload size={14} />
+                      BGM追加
+                    </Button>
+                  </div>
+                </div>
+
+                {bgmLoading ? (
+                  <div className="text-center py-8 text-sm text-muted-foreground">
+                    読み込み中...
+                  </div>
+                ) : bgmTracks.length === 0 ? (
+                  <div className="text-center py-10 text-sm text-muted-foreground">
+                    <Music size={32} className="mx-auto mb-2 opacity-50" />
+                    BGMがまだありません。「BGM追加」からアップロードしてください
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {bgmTracks.map((track) => (
+                      <div
+                        key={track.id}
+                        className="flex items-center gap-3 p-3 bg-background rounded-lg border border-border"
+                      >
+                        <Music size={18} className="text-primary flex-shrink-0" />
+                        <div className="flex-1 min-w-0 space-y-2">
+                          <Input
+                            type="text"
+                            value={track.name}
+                            onChange={(e) => handleRenameBgm(track.id, e.target.value)}
+                            className="bg-card border-input h-8 text-sm"
+                          />
+                          <audio src={track.file_url} controls className="w-full h-8" />
+                        </div>
+                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                          <span className="text-xs text-muted-foreground tabular-nums">
+                            {formatDuration(track.duration)}
+                          </span>
+                          <button
+                            onClick={() => handleDeleteBgm(track.id)}
+                            className="p-1.5 hover:bg-destructive/20 rounded transition"
+                            title="削除"
+                          >
+                            <Trash2 size={14} className="text-destructive" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
       </main>
     </div>

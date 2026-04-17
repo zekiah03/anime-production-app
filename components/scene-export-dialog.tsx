@@ -12,6 +12,7 @@ import {
 import { Download, Square, Video } from 'lucide-react'
 import type {
   AudioFile,
+  BgmTrack,
   Character,
   CharacterExpression,
   Layer,
@@ -42,6 +43,8 @@ export function SceneExportDialog({
   audioFiles,
   expressions,
   backgroundLayers,
+  bgmTrack,
+  bgmVolume,
   open,
   onClose,
 }: {
@@ -50,6 +53,8 @@ export function SceneExportDialog({
   audioFiles: AudioFile[]
   expressions: CharacterExpression[]
   backgroundLayers: Layer[]
+  bgmTrack: BgmTrack | null
+  bgmVolume: number
   open: boolean
   onClose: () => void
 }) {
@@ -225,6 +230,9 @@ export function SceneExportDialog({
 
     let audioCtx: AudioContext | null = null
     let recorder: MediaRecorder | null = null
+    let bgmEl: HTMLAudioElement | null = null
+    let bgmSource: MediaElementAudioSourceNode | null = null
+    let bgmGain: GainNode | null = null
 
     try {
       await Promise.all(
@@ -240,6 +248,28 @@ export function SceneExportDialog({
       if (audioCtx.state === 'suspended') await audioCtx.resume()
 
       const destination = audioCtx.createMediaStreamDestination()
+
+      // BGM: ループ再生して destination と preview speakers にミックス
+      if (bgmTrack?.file_url) {
+        bgmEl = new Audio()
+        bgmEl.src = bgmTrack.file_url
+        bgmEl.loop = true
+        bgmEl.preload = 'auto'
+        await new Promise<void>((resolve, reject) => {
+          if (!bgmEl) return resolve()
+          const onReady = () => resolve()
+          const onErr = () => reject(new Error('BGM の読み込みに失敗'))
+          bgmEl.addEventListener('canplaythrough', onReady, { once: true })
+          bgmEl.addEventListener('error', onErr, { once: true })
+          bgmEl.load()
+        })
+        bgmSource = audioCtx.createMediaElementSource(bgmEl)
+        bgmGain = audioCtx.createGain()
+        bgmGain.gain.value = bgmVolume
+        bgmSource.connect(bgmGain)
+        bgmGain.connect(destination)
+        bgmGain.connect(audioCtx.destination)
+      }
       const videoStream = canvas.captureStream(30)
       const combinedStream = new MediaStream([
         ...videoStream.getVideoTracks(),
@@ -271,6 +301,16 @@ export function SceneExportDialog({
 
       recorder.start(100)
       setStatus('recording')
+
+      // 録画開始後にBGMを流し始める(録音の冒頭から乗るように)
+      if (bgmEl) {
+        try {
+          bgmEl.currentTime = 0
+          await bgmEl.play()
+        } catch (e) {
+          console.warn('[anime-app] bgm play blocked', e)
+        }
+      }
 
       for (let i = 0; i < queue.length; i++) {
         if (cancelledRef.current) break
@@ -349,6 +389,17 @@ export function SceneExportDialog({
         audioEl.src = ''
       }
 
+      // BGMを止めて recorder 停止
+      if (bgmEl) {
+        bgmEl.pause()
+        try {
+          bgmSource?.disconnect()
+          bgmGain?.disconnect()
+        } catch (e) {
+          console.warn('[anime-app] bgm disconnect warn', e)
+        }
+        bgmEl.src = ''
+      }
       recorder.stop()
       await recordingDone
 

@@ -7,6 +7,7 @@ import type {
   Character,
   CharacterExpression,
   AudioFile,
+  BgmTrack,
   Dialogue,
   Scene,
   SceneDialogue,
@@ -15,13 +16,14 @@ import type {
 } from '@/types/db'
 
 const DB_NAME = 'anime-production'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 // 永続化形式 (file_url / image_url は実行時に Blob から生成するので保存しない)
 type StoredCharacter = Omit<Character, 'image_url'> & { image_blob?: Blob }
 type StoredAudioFile = Omit<AudioFile, 'file_url'> & { file_blob: Blob }
 type StoredLayer = Omit<Layer, 'image_url'> & { image_blob: Blob }
 type StoredExpression = Omit<CharacterExpression, 'image_url'> & { image_blob: Blob }
+type StoredBgmTrack = Omit<BgmTrack, 'file_url'> & { file_blob: Blob }
 
 interface AnimeDB extends DBSchema {
   characters: { key: string; value: StoredCharacter }
@@ -52,6 +54,7 @@ interface AnimeDB extends DBSchema {
     value: StoredLayer
     indexes: { by_illustration: string }
   }
+  bgm_tracks: { key: string; value: StoredBgmTrack }
 }
 
 let dbPromise: Promise<IDBPDatabase<AnimeDB>> | null = null
@@ -92,6 +95,9 @@ function getDB() {
         if (!db.objectStoreNames.contains('character_expressions')) {
           const store = db.createObjectStore('character_expressions', { keyPath: 'id' })
           store.createIndex('by_character', 'character_id')
+        }
+        if (!db.objectStoreNames.contains('bgm_tracks')) {
+          db.createObjectStore('bgm_tracks', { keyPath: 'id' })
         }
       },
     })
@@ -370,6 +376,45 @@ export async function saveLayersBatch(layers: Layer[]): Promise<void> {
 export async function deleteLayer(id: string): Promise<void> {
   const db = await getDB()
   await db.delete('layers', id)
+}
+
+// ==================== BGM Tracks ====================
+
+function hydrateBgm(stored: StoredBgmTrack): BgmTrack {
+  return {
+    ...stored,
+    file_url: URL.createObjectURL(stored.file_blob),
+  }
+}
+
+export async function getAllBgmTracks(): Promise<BgmTrack[]> {
+  const db = await getDB()
+  const all = await db.getAll('bgm_tracks')
+  return all
+    .map(hydrateBgm)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+}
+
+export async function saveBgmTrack(track: BgmTrack): Promise<void> {
+  if (!track.file_blob) throw new Error('file_blob is required')
+  const db = await getDB()
+  const { file_url: _file_url, ...rest } = track
+  void _file_url
+  await db.put('bgm_tracks', { ...rest, file_blob: track.file_blob })
+}
+
+export async function deleteBgmTrack(id: string): Promise<void> {
+  const db = await getDB()
+  // 関連する scenes の bgm_track_id を null にする
+  const tx = db.transaction(['bgm_tracks', 'scenes'], 'readwrite')
+  await tx.objectStore('bgm_tracks').delete(id)
+
+  for await (const cursor of tx.objectStore('scenes').iterate()) {
+    if (cursor.value.bgm_track_id === id) {
+      await cursor.update({ ...cursor.value, bgm_track_id: null })
+    }
+  }
+  await tx.done
 }
 
 // ==================== Counts (for dashboard) ====================

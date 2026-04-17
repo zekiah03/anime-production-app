@@ -50,9 +50,21 @@ export interface Scene {
   title: string | null
   description: string | null
   background_illustration_id: string | null // 背景に使う環境素材
+  bgm_track_id: string | null // シーン全体に流す BGM
+  bgm_volume: number // 0..1(未指定なら再生側で 0.25 を既定にする)
   order_index: number
   created_at: string
   updated_at: string
+}
+
+// シーンに貼り付けるBGM(音声ファイル)
+export interface BgmTrack {
+  id: string
+  name: string
+  file_url: string // blob URL (derived)
+  file_blob?: Blob // the actual audio data (persisted to IndexedDB)
+  duration: number | null
+  created_at: string
 }
 
 export interface SceneDialogue {

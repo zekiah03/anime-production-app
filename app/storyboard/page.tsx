@@ -1,17 +1,18 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar'
 import { SceneExportDialog } from '@/components/scene-export-dialog'
-import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer } from '@/types/db'
+import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack } from '@/types/db'
 import {
   deleteScene,
   deleteSceneDialogue,
   getAllAudioFiles,
+  getAllBgmTracks,
   getAllCharacters,
   getAllDialogues,
   getAllExpressions,
@@ -39,10 +40,17 @@ export default function StoryboardPage() {
   const [audioFiles, setAudioFiles] = useState<AudioFile[]>([])
   const [expressions, setExpressions] = useState<CharacterExpression[]>([])
   const [illustrations, setIllustrations] = useState<IllustrationWithLayers[]>([])
+  const [bgmTracks, setBgmTracks] = useState<BgmTrack[]>([])
   const [loading, setLoading] = useState(true)
   const [showSceneForm, setShowSceneForm] = useState(false)
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null)
-  const [sceneFormData, setSceneFormData] = useState({ title: '', description: '', background_illustration_id: '' })
+  const [sceneFormData, setSceneFormData] = useState({
+    title: '',
+    description: '',
+    background_illustration_id: '',
+    bgm_track_id: '',
+    bgm_volume: 0.25,
+  })
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
   const [dialogueToAdd, setDialogueToAdd] = useState('')
   const [draggedSceneId, setDraggedSceneId] = useState<string | null>(null)
@@ -55,7 +63,7 @@ export default function StoryboardPage() {
 
   async function loadAll() {
     try {
-      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts] = await Promise.all([
+      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts, allBgm] = await Promise.all([
         getAllScenes(),
         getAllSceneDialogues(),
         getAllDialogues(),
@@ -63,6 +71,7 @@ export default function StoryboardPage() {
         getAllAudioFiles(),
         getAllExpressions(),
         getAllIllustrations(),
+        getAllBgmTracks(),
       ])
       const withLayers: IllustrationWithLayers[] = await Promise.all(
         illusts.map(async (i) => ({
@@ -84,11 +93,17 @@ export default function StoryboardPage() {
       setAudioFiles(allAudio)
       setExpressions(allExpressions)
       setIllustrations(withLayers)
+      setBgmTracks(allBgm)
     } catch (e) {
       console.error('[anime-app] load storyboard failed', e)
     } finally {
       setLoading(false)
     }
+  }
+
+  function bgmForScene(scene: Scene): BgmTrack | null {
+    if (!scene.bgm_track_id) return null
+    return bgmTracks.find((t) => t.id === scene.bgm_track_id) ?? null
   }
 
   function backgroundLayersForScene(scene: Scene): Layer[] {
@@ -115,6 +130,8 @@ export default function StoryboardPage() {
         title: sceneFormData.title,
         description: sceneFormData.description || null,
         background_illustration_id: sceneFormData.background_illustration_id || null,
+        bgm_track_id: sceneFormData.bgm_track_id || null,
+        bgm_volume: sceneFormData.bgm_volume,
         order_index: existing.order_index,
         created_at: existing.created_at,
         updated_at: now,
@@ -132,6 +149,8 @@ export default function StoryboardPage() {
         title: sceneFormData.title,
         description: sceneFormData.description || null,
         background_illustration_id: sceneFormData.background_illustration_id || null,
+        bgm_track_id: sceneFormData.bgm_track_id || null,
+        bgm_volume: sceneFormData.bgm_volume,
         order_index: maxOrder + 1,
         created_at: now,
         updated_at: now,
@@ -144,7 +163,13 @@ export default function StoryboardPage() {
       setScenes((prev) => [...prev, newScene])
     }
 
-    setSceneFormData({ title: '', description: '', background_illustration_id: '' })
+    setSceneFormData({
+      title: '',
+      description: '',
+      background_illustration_id: '',
+      bgm_track_id: '',
+      bgm_volume: 0.25,
+    })
     setShowSceneForm(false)
   }
 
@@ -213,6 +238,8 @@ export default function StoryboardPage() {
       title: scene.title || '',
       description: scene.description || '',
       background_illustration_id: scene.background_illustration_id || '',
+      bgm_track_id: scene.bgm_track_id || '',
+      bgm_volume: typeof scene.bgm_volume === 'number' ? scene.bgm_volume : 0.25,
     })
     setEditingSceneId(scene.id)
     setShowSceneForm(true)
@@ -232,7 +259,7 @@ export default function StoryboardPage() {
             <Button
               onClick={() => {
                 setEditingSceneId(null)
-                setSceneFormData({ title: '', description: '', background_illustration_id: '' })
+                setSceneFormData({ title: '', description: '', background_illustration_id: '', bgm_track_id: '', bgm_volume: 0.25 })
                 setShowSceneForm(!showSceneForm)
               }}
               className="gap-2"
@@ -288,6 +315,47 @@ export default function StoryboardPage() {
                     </p>
                   )}
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">BGM</label>
+                  <select
+                    value={sceneFormData.bgm_track_id}
+                    onChange={(e) => setSceneFormData({ ...sceneFormData, bgm_track_id: e.target.value })}
+                    className="w-full px-3 py-2 bg-background border border-input rounded-md text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="">なし</option>
+                    {bgmTracks.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                  {bgmTracks.length === 0 && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      環境タブ → BGMタブで追加すると選択できます
+                    </p>
+                  )}
+                </div>
+                {sceneFormData.bgm_track_id && (
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">
+                      BGM音量: {Math.round(sceneFormData.bgm_volume * 100)}%
+                    </label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={sceneFormData.bgm_volume}
+                      onChange={(e) =>
+                        setSceneFormData({ ...sceneFormData, bgm_volume: Number(e.target.value) })
+                      }
+                      className="w-full accent-primary"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      声に対するBGMの音量。25%前後が一般的
+                    </p>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <Button type="submit">
                     {editingSceneId ? '更新' : '作成'}
@@ -298,7 +366,7 @@ export default function StoryboardPage() {
                     onClick={() => {
                       setShowSceneForm(false)
                       setEditingSceneId(null)
-                      setSceneFormData({ title: '', description: '', background_illustration_id: '' })
+                      setSceneFormData({ title: '', description: '', background_illustration_id: '', bgm_track_id: '', bgm_volume: 0.25 })
                     }}
                   >
                     キャンセル
@@ -495,6 +563,10 @@ export default function StoryboardPage() {
               audioFiles={audioFiles}
               expressions={expressions}
               backgroundLayers={playScene ? backgroundLayersForScene(playScene) : []}
+              bgmTrack={playScene ? bgmForScene(playScene) : null}
+              bgmVolume={
+                playScene && typeof playScene.bgm_volume === 'number' ? playScene.bgm_volume : 0.25
+              }
               onClose={() => setPlayingSceneId(null)}
             />
             <SceneExportDialog
@@ -503,6 +575,12 @@ export default function StoryboardPage() {
               audioFiles={audioFiles}
               expressions={expressions}
               backgroundLayers={exportScene ? backgroundLayersForScene(exportScene) : []}
+              bgmTrack={exportScene ? bgmForScene(exportScene) : null}
+              bgmVolume={
+                exportScene && typeof exportScene.bgm_volume === 'number'
+                  ? exportScene.bgm_volume
+                  : 0.25
+              }
               open={!!exportingSceneId}
               onClose={() => setExportingSceneId(null)}
             />
@@ -529,6 +607,8 @@ function ScenePlayerDialog({
   audioFiles,
   expressions,
   backgroundLayers,
+  bgmTrack,
+  bgmVolume,
   onClose,
 }: {
   scene: SceneWithDialogues | null
@@ -536,16 +616,32 @@ function ScenePlayerDialog({
   audioFiles: AudioFile[]
   expressions: CharacterExpression[]
   backgroundLayers: Layer[]
+  bgmTrack: BgmTrack | null
+  bgmVolume: number
   onClose: () => void
 }) {
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
+  const bgmRef = useRef<HTMLAudioElement | null>(null)
 
   // scene が変わったらリセット
   useEffect(() => {
     setIndex(0)
     setPlaying(false)
   }, [scene?.id])
+
+  // BGM: playing=true の間だけループ再生
+  useEffect(() => {
+    const el = bgmRef.current
+    if (!el) return
+    el.volume = bgmVolume
+    if (playing && bgmTrack) {
+      el.currentTime = 0
+      el.play().catch((e) => console.warn('[anime-app] bgm play blocked', e))
+    } else {
+      el.pause()
+    }
+  }, [playing, bgmTrack?.id, bgmVolume])
 
   if (!scene) return null
 
@@ -674,6 +770,14 @@ function ScenePlayerDialog({
             </div>
           </div>
         )}
+        {/* BGM: playing中ループ再生(声側の AudioContext とは独立) */}
+        <audio
+          ref={bgmRef}
+          src={bgmTrack?.file_url ?? undefined}
+          loop
+          preload="auto"
+          className="hidden"
+        />
       </DialogContent>
     </Dialog>
   )
