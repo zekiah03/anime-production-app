@@ -26,11 +26,13 @@ export function SceneTimelineBar({
   clips,
   bgmName,
   onReorder,
+  onClipClick,
   className,
 }: {
   clips: TimelineClip[]
   bgmName?: string | null
   onReorder: (fromIdx: number, toIdx: number) => void
+  onClipClick?: (clipId: string) => void
   className?: string
 }) {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null)
@@ -75,6 +77,12 @@ export function SceneTimelineBar({
               <div
                 key={clip.id}
                 draggable
+                onClick={(e) => {
+                  if (onClipClick) {
+                    e.stopPropagation()
+                    onClipClick(clip.id)
+                  }
+                }}
                 onDragStart={(e) => {
                   e.stopPropagation()
                   setDraggedIdx(i)

@@ -1166,6 +1166,22 @@ export default function StoryboardPage() {
         setShowShortcutsHelp((v) => !v)
         return
       }
+      // Alt+1〜9 で動画切替(0 は未分類)
+      if (e.altKey && !e.ctrlKey && !e.metaKey && /^[0-9]$/.test(e.key)) {
+        const n = Number(e.key)
+        if (n === 0) {
+          e.preventDefault()
+          setSelectedVideoId(null)
+        } else {
+          const sorted = [...videos].sort((a, b) => a.order_index - b.order_index)
+          const target = sorted[n - 1]
+          if (target) {
+            e.preventDefault()
+            setSelectedVideoId(target.id)
+          }
+        }
+        return
+      }
       if (e.key === '/') {
         e.preventDefault()
         searchInputRef.current?.focus()
@@ -1179,7 +1195,7 @@ export default function StoryboardPage() {
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [checkedSceneIds, allExpanded, selectedSceneId, scenes, selectedVideoId])
+  }, [checkedSceneIds, allExpanded, selectedSceneId, scenes, selectedVideoId, videos])
 
   // ナレーション(character_id=null の Dialogue)を新規作成してシーンに追加する
   async function handleAddNarration(sceneId: string) {
@@ -2084,7 +2100,23 @@ export default function StoryboardPage() {
               <Button
                 onClick={() => {
                   setEditingSceneId(null)
-                  setSceneFormData({ title: '', description: '', background_illustration_id: '', bgm_track_id: '', bgm_volume: 0.25, video_id: '' })
+                  // スマートデフォルト: 現動画内の末尾シーンから BGM/背景/音量を継承
+                  const lastInVideo = scenes
+                    .filter((s) => (s.video_id ?? null) === selectedVideoId)
+                    .sort((a, b) => a.order_index - b.order_index)
+                    .slice(-1)[0]
+                  setSceneFormData({
+                    title: '',
+                    description: '',
+                    background_illustration_id:
+                      lastInVideo?.background_illustration_id ?? '',
+                    bgm_track_id: lastInVideo?.bgm_track_id ?? '',
+                    bgm_volume:
+                      typeof lastInVideo?.bgm_volume === 'number'
+                        ? lastInVideo.bgm_volume
+                        : 0.25,
+                    video_id: selectedVideoId ?? '',
+                  })
                   setShowSceneForm(!showSceneForm)
                 }}
                 className="gap-2"
@@ -2866,6 +2898,7 @@ export default function StoryboardPage() {
                                 onReorder={(from, to) =>
                                   handleReorderDialogues(scene.id, from, to)
                                 }
+                                onClipClick={(sdId) => setPreviewingSdId(sdId)}
                               />
 
                               {/* ===== 登場キャラ(scene_cast) ===== */}
@@ -4564,6 +4597,8 @@ export default function StoryboardPage() {
                     { k: 'Esc', d: '選択解除 / 全展開解除 / 展開シーンを閉じる' },
                     { k: 'Ctrl / ⌘ + A', d: '現在の動画内のシーンを全選択' },
                     { k: 'Ctrl / ⌘ + D', d: '選択 or 展開中のシーンを複製' },
+                    { k: 'Alt + 1〜9', d: 'その順番の動画タブへ切替' },
+                    { k: 'Alt + 0', d: '未分類タブへ切替' },
                     { k: 'Delete / Backspace', d: '選択中のシーンを一括削除' },
                   ].map((row) => (
                     <div
