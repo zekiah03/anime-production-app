@@ -525,6 +525,45 @@ export async function saveTelopStyle(style: TelopStyle): Promise<void> {
   await db.put('settings', { id: 'telop', telop_style: style })
 }
 
+// ==================== Raw access (for export/import) ====================
+
+// プロジェクト書き出し/読み込みのために生データにアクセスするヘルパー。
+// 通常の getAll*() は URL を hydrate するため、エクスポートには不向き(URL は実行時にしか意味がない)。
+
+export const STORE_NAMES = [
+  'characters',
+  'character_expressions',
+  'audio_files',
+  'dialogues',
+  'scenes',
+  'scene_dialogues',
+  'illustrations',
+  'layers',
+  'bgm_tracks',
+  'sound_effects',
+  'scene_cast',
+  'settings',
+] as const
+
+export type StoreName = (typeof STORE_NAMES)[number]
+
+export async function getAllRaw(storeName: StoreName): Promise<unknown[]> {
+  const db = await getDB()
+  // idb の厳密な型付けはストアごとに異なる value を要求するが、
+  // 汎用アクセスなので as never で bypass する。
+  return db.getAll(storeName as never)
+}
+
+export async function clearStore(storeName: StoreName): Promise<void> {
+  const db = await getDB()
+  await db.clear(storeName as never)
+}
+
+export async function putRaw(storeName: StoreName, item: unknown): Promise<void> {
+  const db = await getDB()
+  await db.put(storeName as never, item as never)
+}
+
 // ==================== Counts (for dashboard) ====================
 
 export async function getCounts(): Promise<{

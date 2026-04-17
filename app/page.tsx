@@ -1,13 +1,20 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Users, Film, Plus, Mountain } from 'lucide-react'
+import { Users, Film, Plus, Mountain, Download, Upload, Package } from 'lucide-react'
 import type { Character } from '@/types/db'
 import { getAllCharacters, getCounts } from '@/lib/db'
 import { Sidebar } from '@/components/sidebar'
+import {
+  exportProject,
+  importProject,
+  makeExportFilename,
+  triggerDownload,
+  type ImportResult,
+} from '@/lib/project-export-import'
 
 export default function Dashboard() {
   const [counts, setCounts] = useState({
@@ -18,6 +25,10 @@ export default function Dashboard() {
     illustrations: 0,
   })
   const [recentCharacters, setRecentCharacters] = useState<Character[]>([])
+  const [isExporting, setIsExporting] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
+  const [lastImport, setLastImport] = useState<ImportResult | null>(null)
+  const importInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     Promise.all([getCounts(), getAllCharacters()])
@@ -27,6 +38,46 @@ export default function Dashboard() {
       })
       .catch((e) => console.error('[anime-app] dashboard load failed', e))
   }, [])
+
+  async function handleExport() {
+    if (isExporting) return
+    setIsExporting(true)
+    try {
+      const blob = await exportProject()
+      triggerDownload(blob, makeExportFilename())
+    } catch (e) {
+      console.error('[anime-app] export failed', e)
+      alert('エクスポートに失敗しました: ' + (e as Error).message)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  async function handleImport(file: File | null) {
+    if (!file || isImporting) return
+    if (!confirm('インポートすると現在のデータは全て上書きされます。続けますか?')) return
+    setIsImporting(true)
+    try {
+      const result = await importProject(file, { clearExisting: true })
+      setLastImport(result)
+      // 統計情報を再読み込み
+      const [c, chars] = await Promise.all([getCounts(), getAllCharacters()])
+      setCounts(c)
+      setRecentCharacters(chars.slice(0, 5))
+      alert(
+        `インポート完了。${Object.entries(result.counts)
+          .filter(([, n]) => n > 0)
+          .map(([k, n]) => `${k}:${n}`)
+          .join(', ')}`,
+      )
+    } catch (e) {
+      console.error('[anime-app] import failed', e)
+      alert('インポートに失敗しました: ' + (e as Error).message)
+    } finally {
+      setIsImporting(false)
+      if (importInputRef.current) importInputRef.current.value = ''
+    }
+  }
 
   return (
     <div className="flex h-screen bg-background">
@@ -81,6 +132,55 @@ export default function Dashboard() {
               </Card>
             </Link>
           </div>
+
+          {/* プロジェクト(端末間移行 / バックアップ) */}
+          <Card className="bg-card border-border p-6 mb-6">
+            <div className="flex items-start gap-4 flex-wrap">
+              <Package className="text-primary mt-1 flex-shrink-0" size={24} />
+              <div className="flex-1 min-w-0">
+                <h3 className="text-lg font-semibold text-foreground">プロジェクト(端末間移行)</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  全キャラ・表情・音声・セリフ・シーン・BGM・SE・背景を zip 1ファイルに
+                  まとめて書き出し、もう一方の端末で読み込めます。OneDrive や Dropbox の
+                  同期フォルダに保存するとバックアップも兼ねられます。
+                </p>
+              </div>
+              <div className="flex gap-2 flex-shrink-0">
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept=".zip,application/zip"
+                  className="hidden"
+                  onChange={(e) => handleImport(e.target.files?.[0] ?? null)}
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => importInputRef.current?.click()}
+                  disabled={isImporting}
+                  className="gap-2"
+                  title="zip を選んで、現在のデータを上書きしてインポート"
+                >
+                  <Upload size={16} />
+                  {isImporting ? '読み込み中…' : 'インポート'}
+                </Button>
+                <Button
+                  onClick={handleExport}
+                  disabled={isExporting}
+                  className="gap-2"
+                  title="現在のデータを zip で書き出す"
+                >
+                  <Download size={16} />
+                  {isExporting ? '書き出し中…' : 'エクスポート'}
+                </Button>
+              </div>
+            </div>
+            {lastImport && (
+              <p className="text-xs text-muted-foreground mt-3">
+                最後のインポート: {new Date(lastImport.manifest.exported_at).toLocaleString('ja-JP')}
+                の書き出し / {Object.values(lastImport.counts).reduce((a, b) => a + b, 0)} 件を読み込み
+              </p>
+            )}
+          </Card>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
