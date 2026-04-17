@@ -8,6 +8,7 @@ import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Vid
 import { Sidebar } from '@/components/sidebar'
 import { SceneExportDialog } from '@/components/scene-export-dialog'
 import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
+import { SceneTimelineBar, type TimelineClip } from '@/components/scene-timeline'
 import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, SceneCastMember } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
@@ -127,6 +128,62 @@ export default function StoryboardPage() {
   function bgmForScene(scene: Scene): BgmTrack | null {
     if (!scene.bgm_track_id) return null
     return bgmTracks.find((t) => t.id === scene.bgm_track_id) ?? null
+  }
+
+  // タイムライン用: 各セリフ(SceneDialogue)の所要時間などを計算する
+  function buildTimelineClips(scene: SceneWithDialogues): TimelineClip[] {
+    return scene.dialogues.map((sd) => {
+      const d = sd.dialogue
+      const isNarration = !d?.character_id
+      const character = characters.find((c) => c.id === d?.character_id)
+      const audio = audioFiles.find((a) => a.id === d?.audio_id)
+      const audioDuration = typeof audio?.duration === 'number' ? audio.duration : 0
+      const silentMs = typeof d?.duration_ms === 'number' ? d.duration_ms : 3000
+      const durationSec = audio ? audioDuration : silentMs / 1000
+      return {
+        id: sd.id,
+        label: isNarration ? 'ナレーション' : character?.name ?? '?',
+        durationSec: Math.max(0.1, durationSec),
+        hasSe: !!sd.se_id,
+        isNarration,
+        text: d?.text ?? '',
+      }
+    })
+  }
+
+  // シーン内のセリフ(scene_dialogues)の並び替え
+  async function handleReorderDialogues(sceneId: string, from: number, to: number) {
+    if (from === to) return
+    const scene = scenes.find((s) => s.id === sceneId)
+    if (!scene) return
+    const reordered = [...scene.dialogues]
+    const [moved] = reordered.splice(from, 1)
+    reordered.splice(to, 0, moved)
+    const renumbered = reordered.map((sd, idx) => ({ ...sd, order_index: idx }))
+
+    // 各 SceneDialogue を永続化(dialogue は派生データなので保存しない)
+    await Promise.all(
+      renumbered.map((sd) => {
+        const row: SceneDialogue = {
+          id: sd.id,
+          scene_id: sd.scene_id,
+          dialogue_id: sd.dialogue_id,
+          order_index: sd.order_index,
+          se_id: sd.se_id ?? null,
+          se_volume: typeof sd.se_volume === 'number' ? sd.se_volume : 1,
+          character_x: typeof sd.character_x === 'number' ? sd.character_x : 0.5,
+          character_scale:
+            typeof sd.character_scale === 'number' ? sd.character_scale : 1.0,
+          character_flipped: sd.character_flipped ?? false,
+          created_at: sd.created_at,
+        }
+        return saveSceneDialogue(row)
+      }),
+    )
+
+    setScenes((prev) =>
+      prev.map((s) => (s.id === sceneId ? { ...s, dialogues: renumbered } : s)),
+    )
   }
 
   function castForScene(sceneId: string): SceneCastMember[] {
@@ -622,6 +679,15 @@ export default function StoryboardPage() {
                                   縮める
                                 </Button>
                               </div>
+
+                              {/* ===== タイムライン ===== */}
+                              <SceneTimelineBar
+                                clips={buildTimelineClips(scene)}
+                                bgmName={bgmForScene(scene)?.name ?? null}
+                                onReorder={(from, to) =>
+                                  handleReorderDialogues(scene.id, from, to)
+                                }
+                              />
 
                               {/* ===== 登場キャラ(scene_cast) ===== */}
                               <div className="space-y-2">
