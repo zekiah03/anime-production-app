@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video } from 'lucide-react'
+import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video, Type } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar'
 import { SceneExportDialog } from '@/components/scene-export-dialog'
-import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue } from '@/types/db'
+import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
+import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle } from '@/types/db'
+import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
   deleteScene,
   deleteSceneDialogue,
@@ -21,9 +23,11 @@ import {
   getAllScenes,
   getAllSoundEffects,
   getLayersByIllustration,
+  getTelopStyle,
   saveScene,
   saveSceneDialogue,
   saveScenesBatch,
+  saveTelopStyle,
 } from '@/lib/db'
 import { LipSyncStage } from '@/components/lip-sync-stage'
 import {
@@ -58,6 +62,8 @@ export default function StoryboardPage() {
   const [draggedSceneId, setDraggedSceneId] = useState<string | null>(null)
   const [playingSceneId, setPlayingSceneId] = useState<string | null>(null)
   const [exportingSceneId, setExportingSceneId] = useState<string | null>(null)
+  const [telopStyle, setTelopStyle] = useState<TelopStyle>(DEFAULT_TELOP_STYLE)
+  const [showTelopSettings, setShowTelopSettings] = useState(false)
 
   useEffect(() => {
     loadAll()
@@ -65,7 +71,7 @@ export default function StoryboardPage() {
 
   async function loadAll() {
     try {
-      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts, allBgm, allSe] = await Promise.all([
+      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts, allBgm, allSe, savedTelop] = await Promise.all([
         getAllScenes(),
         getAllSceneDialogues(),
         getAllDialogues(),
@@ -75,6 +81,7 @@ export default function StoryboardPage() {
         getAllIllustrations(),
         getAllBgmTracks(),
         getAllSoundEffects(),
+        getTelopStyle(),
       ])
       const withLayers: IllustrationWithLayers[] = await Promise.all(
         illusts.map(async (i) => ({
@@ -98,6 +105,7 @@ export default function StoryboardPage() {
       setIllustrations(withLayers)
       setBgmTracks(allBgm)
       setSounds(allSe)
+      setTelopStyle(savedTelop)
     } catch (e) {
       console.error('[anime-app] load storyboard failed', e)
     } finally {
@@ -292,17 +300,28 @@ export default function StoryboardPage() {
               <h2 className="text-3xl font-bold text-foreground">ストーリーボード</h2>
               <p className="text-muted-foreground mt-1">シーンを構築してストーリーを作成</p>
             </div>
-            <Button
-              onClick={() => {
-                setEditingSceneId(null)
-                setSceneFormData({ title: '', description: '', background_illustration_id: '', bgm_track_id: '', bgm_volume: 0.25 })
-                setShowSceneForm(!showSceneForm)
-              }}
-              className="gap-2"
-            >
-              <Plus size={18} />
-              新規シーン
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowTelopSettings(true)}
+                className="gap-2"
+                title="テロップ(字幕)の見た目を調整"
+              >
+                <Type size={16} />
+                テロップ設定
+              </Button>
+              <Button
+                onClick={() => {
+                  setEditingSceneId(null)
+                  setSceneFormData({ title: '', description: '', background_illustration_id: '', bgm_track_id: '', bgm_volume: 0.25 })
+                  setShowSceneForm(!showSceneForm)
+                }}
+                className="gap-2"
+              >
+                <Plus size={18} />
+                新規シーン
+              </Button>
+            </div>
           </div>
 
           {showSceneForm && (
@@ -650,6 +669,7 @@ export default function StoryboardPage() {
                 playScene && typeof playScene.bgm_volume === 'number' ? playScene.bgm_volume : 0.25
               }
               sounds={sounds}
+              telopStyle={telopStyle}
               onClose={() => setPlayingSceneId(null)}
             />
             <SceneExportDialog
@@ -665,8 +685,18 @@ export default function StoryboardPage() {
                   : 0.25
               }
               sounds={sounds}
+              telopStyle={telopStyle}
               open={!!exportingSceneId}
               onClose={() => setExportingSceneId(null)}
+            />
+            <TelopSettingsDialog
+              open={showTelopSettings}
+              initialStyle={telopStyle}
+              onSave={async (next) => {
+                await saveTelopStyle(next)
+                setTelopStyle(next)
+              }}
+              onClose={() => setShowTelopSettings(false)}
             />
           </>
         )
@@ -696,6 +726,7 @@ function ScenePlayerDialog({
   bgmTrack,
   bgmVolume,
   sounds,
+  telopStyle,
   onClose,
 }: {
   scene: SceneWithDialogues | null
@@ -706,6 +737,7 @@ function ScenePlayerDialog({
   bgmTrack: BgmTrack | null
   bgmVolume: number
   sounds: SoundEffect[]
+  telopStyle: TelopStyle
   onClose: () => void
 }) {
   const [index, setIndex] = useState(0)
@@ -820,6 +852,7 @@ function ScenePlayerDialog({
                 audioUrl={current?.audio?.file_url ?? null}
                 overrideExpressionId={current?.expressionId ?? null}
                 caption={current?.text ?? null}
+                telopStyle={telopStyle}
                 backgroundLayers={backgroundLayers}
                 playing={playing}
                 onEnded={handleEnded}

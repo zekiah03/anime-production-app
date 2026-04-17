@@ -1,5 +1,42 @@
 // 共通型定義(将来DBを再構築するときにここを拡張する)
 
+// ==================== テロップ(字幕)スタイル ====================
+// 全シーン共通の見た目設定。singleton として settings ストアに保存する。
+
+export type TelopFont = 'gothic' | 'mincho' | 'rounded'
+export type TelopPosition = 'top' | 'center' | 'bottom'
+
+export interface TelopStyle {
+  font: TelopFont
+  size: number // px
+  color: string // '#ffffff'
+  stroke_color: string // '#000000'
+  stroke_width: number // px (0..12)
+  band_color: string // '#000000'
+  band_opacity: number // 0..1
+  position: TelopPosition
+  bold: boolean
+}
+
+export const DEFAULT_TELOP_STYLE: TelopStyle = {
+  font: 'gothic',
+  size: 44,
+  color: '#ffffff',
+  stroke_color: '#000000',
+  stroke_width: 6,
+  band_color: '#000000',
+  band_opacity: 0.72,
+  position: 'bottom',
+  bold: true,
+}
+
+export const TELOP_FONT_FAMILY: Record<TelopFont, string> = {
+  gothic: '"Hiragino Kaku Gothic ProN", "Yu Gothic", "MS Gothic", sans-serif',
+  mincho: '"Hiragino Mincho ProN", "Yu Mincho", "MS Mincho", serif',
+  rounded: '"Kosugi Maru", "Hiragino Maru Gothic ProN", "M PLUS Rounded 1c", sans-serif',
+}
+
+
 export interface Character {
   id: string
   name: string

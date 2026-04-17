@@ -18,7 +18,10 @@ import type {
   Layer,
   SceneWithDialogues,
   SoundEffect,
+  TelopStyle,
 } from '@/types/db'
+import { DEFAULT_TELOP_STYLE, TELOP_FONT_FAMILY } from '@/types/db'
+import { hexToRgba } from '@/components/telop-settings-dialog'
 
 interface ResolvedDialogue {
   text: string
@@ -49,6 +52,7 @@ export function SceneExportDialog({
   bgmTrack,
   bgmVolume,
   sounds,
+  telopStyle,
   open,
   onClose,
 }: {
@@ -60,9 +64,11 @@ export function SceneExportDialog({
   bgmTrack: BgmTrack | null
   bgmVolume: number
   sounds: SoundEffect[]
+  telopStyle?: TelopStyle | null
   open: boolean
   onClose: () => void
 }) {
+  const effectiveStyle: TelopStyle = telopStyle ?? DEFAULT_TELOP_STYLE
   const [status, setStatus] = useState<Status>('idle')
   const [progressIndex, setProgressIndex] = useState(0)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -176,8 +182,10 @@ export function SceneExportDialog({
     }
 
     if (current.text) {
-      const fontSize = 44
-      ctx.font = `bold ${fontSize}px "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif`
+      const style = effectiveStyle
+      const fontSize = style.size
+      const weight = style.bold ? 'bold ' : ''
+      ctx.font = `${weight}${fontSize}px ${TELOP_FONT_FAMILY[style.font]}`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'bottom'
 
@@ -188,18 +196,32 @@ export function SceneExportDialog({
       const bandWidth = Math.min(maxBandWidth, metrics.width + padX * 2)
       const bandHeight = fontSize + padY * 2
       const bandX = (WIDTH - bandWidth) / 2
-      const bandY = HEIGHT - bandHeight - 60
 
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.72)'
+      // 位置: top / center / bottom
+      let bandY: number
+      if (style.position === 'top') {
+        bandY = 60
+      } else if (style.position === 'center') {
+        bandY = (HEIGHT - bandHeight) / 2
+      } else {
+        bandY = HEIGHT - bandHeight - 60
+      }
+
+      ctx.fillStyle = hexToRgba(style.band_color, style.band_opacity)
       ctx.beginPath()
       ctx.roundRect(bandX, bandY, bandWidth, bandHeight, 14)
       ctx.fill()
 
       const textY = bandY + bandHeight - padY
-      ctx.lineWidth = 6
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)'
-      ctx.strokeText(current.text, WIDTH / 2, textY)
-      ctx.fillStyle = '#ffffff'
+      if (style.stroke_width > 0) {
+        ctx.lineWidth = style.stroke_width
+        ctx.strokeStyle = style.stroke_color
+        // 縁取りが太いときはなめらかに見えるように線を先に打つ
+        ctx.lineJoin = 'round'
+        ctx.miterLimit = 2
+        ctx.strokeText(current.text, WIDTH / 2, textY)
+      }
+      ctx.fillStyle = style.color
       ctx.fillText(current.text, WIDTH / 2, textY)
     }
   }

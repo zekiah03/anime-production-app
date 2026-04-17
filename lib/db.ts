@@ -14,10 +14,12 @@ import type {
   SoundEffect,
   Illustration,
   Layer,
+  TelopStyle,
 } from '@/types/db'
+import { DEFAULT_TELOP_STYLE } from '@/types/db'
 
 const DB_NAME = 'anime-production'
-const DB_VERSION = 4
+const DB_VERSION = 5
 
 // 永続化形式 (file_url / image_url は実行時に Blob から生成するので保存しない)
 type StoredCharacter = Omit<Character, 'image_url'> & { image_blob?: Blob }
@@ -58,6 +60,8 @@ interface AnimeDB extends DBSchema {
   }
   bgm_tracks: { key: string; value: StoredBgmTrack }
   sound_effects: { key: string; value: StoredSoundEffect }
+  // settings: id をキーにした singleton。今は 'telop' のみ
+  settings: { key: string; value: { id: string; telop_style?: TelopStyle } }
 }
 
 let dbPromise: Promise<IDBPDatabase<AnimeDB>> | null = null
@@ -104,6 +108,9 @@ function getDB() {
         }
         if (!db.objectStoreNames.contains('sound_effects')) {
           db.createObjectStore('sound_effects', { keyPath: 'id' })
+        }
+        if (!db.objectStoreNames.contains('settings')) {
+          db.createObjectStore('settings', { keyPath: 'id' })
         }
       },
     })
@@ -460,6 +467,19 @@ export async function deleteSoundEffect(id: string): Promise<void> {
     }
   }
   await tx.done
+}
+
+// ==================== Settings (singleton) ====================
+
+export async function getTelopStyle(): Promise<TelopStyle> {
+  const db = await getDB()
+  const row = await db.get('settings', 'telop')
+  return row?.telop_style ?? DEFAULT_TELOP_STYLE
+}
+
+export async function saveTelopStyle(style: TelopStyle): Promise<void> {
+  const db = await getDB()
+  await db.put('settings', { id: 'telop', telop_style: style })
 }
 
 // ==================== Counts (for dashboard) ====================

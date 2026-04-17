@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Users } from 'lucide-react'
-import type { Character, CharacterExpression, Layer } from '@/types/db'
+import type { Character, CharacterExpression, Layer, TelopStyle } from '@/types/db'
+import { DEFAULT_TELOP_STYLE } from '@/types/db'
+import { toBandStyle, toTextStyle } from '@/components/telop-settings-dialog'
 
 interface LipSyncStageProps {
   character: Character | null
@@ -12,6 +14,7 @@ interface LipSyncStageProps {
   threshold?: number
   playing: boolean
   caption?: string | null
+  telopStyle?: TelopStyle | null
   // 背景レイヤー(order_index 昇順、可視のみ)。キャラ画像の後ろに重ねる。
   backgroundLayers?: Layer[]
   onEnded?: () => void
@@ -28,10 +31,12 @@ export function LipSyncStage({
   threshold = 40,
   playing,
   caption,
+  telopStyle,
   backgroundLayers,
   onEnded,
   className,
 }: LipSyncStageProps) {
+  const effectiveStyle = telopStyle ?? DEFAULT_TELOP_STYLE
   const [mouthOpen, setMouthOpen] = useState(false)
   const [blinking, setBlinking] = useState(false)
 
@@ -210,13 +215,19 @@ export function LipSyncStage({
         </div>
       )}
       {caption && playing && (
-        <div className="absolute inset-x-2 bottom-2 pointer-events-none">
+        <div
+          className="absolute inset-x-2 pointer-events-none"
+          style={{
+            top: effectiveStyle.position === 'top' ? 8 : undefined,
+            bottom: effectiveStyle.position === 'bottom' ? 8 : undefined,
+            ...(effectiveStyle.position === 'center'
+              ? { top: '50%', transform: 'translateY(-50%)' }
+              : {}),
+          }}
+        >
           <div className="mx-auto max-w-[95%] text-center">
-            <span
-              className="inline-block px-3 py-1.5 rounded bg-black/70 text-white text-sm md:text-base font-bold leading-tight"
-              style={{ textShadow: '1px 1px 2px rgba(0,0,0,0.9)' }}
-            >
-              {caption}
+            <span className="inline-block" style={toBandStyle(effectiveStyle)}>
+              <span style={toTextStyle(effectiveStyle)}>{caption}</span>
             </span>
           </div>
         </div>
