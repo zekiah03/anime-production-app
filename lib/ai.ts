@@ -16,9 +16,14 @@ export interface AiCompletionRequest {
   messages: AiMessage[]
   // 個別呼び出しで model 等を上書きしたい場合
   modelOverride?: string
+  // Anthropic の API 仕様上 max_tokens が必須のため、デフォルトで大きめの値
+  // (実質無制限に近い)を送る。ユーザーが極端に長い応答を抑えたい特殊ケース用。
   maxTokensOverride?: number
   temperatureOverride?: number
 }
+
+// Anthropic は max_tokens 必須。ユーザー側では設定しなくて良いよう、デフォルトを大きく取る。
+const DEFAULT_MAX_TOKENS = 8192
 
 export interface AiCompletionResponse {
   text: string
@@ -80,7 +85,9 @@ export async function runAi(
     )
   }
   const model = req.modelOverride ?? settings.model
-  const maxTokens = req.maxTokensOverride ?? settings.maxTokens ?? 1024
+  // ユーザーが明示的に絞らない限り、トークン上限は実質無効化(大きめの定数を送る)。
+  // OpenAI / Gemini はそもそも max_tokens 省略可能だが、Anthropic は必須なので常に渡す。
+  const maxTokens = req.maxTokensOverride ?? DEFAULT_MAX_TOKENS
   const temperature = req.temperatureOverride ?? settings.temperature ?? 0.7
 
   if (settings.provider === 'openai') {

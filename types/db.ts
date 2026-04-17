@@ -132,19 +132,18 @@ export interface AiSettings {
   }
   // モデル名。プロバイダごとに自由なので string で持つ
   model: string
-  // 最大応答トークン。プロバイダによって意味は若干違うが、超上限ガード用
-  maxTokens?: number
   // 0..2。生成の多様性
   temperature?: number
   // 有効/無効の全体スイッチ(OFF にすると UI から AI ボタンが消える)
   enabled: boolean
 }
 
+// API キーはアプリコードに一切組み込まず、端末の IndexedDB にのみ保存する。
+// 初期値は空(ユーザーが /settings から自分の鍵を入れるまでは AI は無効)。
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   provider: 'openai',
   apiKeys: {},
   model: 'gpt-4o-mini',
-  maxTokens: 1024,
   temperature: 0.7,
   enabled: false,
 }

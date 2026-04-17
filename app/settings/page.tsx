@@ -151,11 +151,17 @@ export default function SettingsPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-xl font-semibold text-foreground">AI 連携</h3>
-                <p className="text-xs text-muted-foreground mt-1">
-                  セリフ生成・タイトル提案などに使います。API キーは
-                  この端末の IndexedDB にのみ保存されます。
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  セリフ生成・タイトル提案などに使います。
                   <br />
-                  AI 呼び出し時は、選択したプロバイダへリクエストが送信されます。
+                  <span className="text-foreground">
+                    API キーはアプリコードには一切組み込まれておらず、
+                    <strong>この端末の IndexedDB にのみ保存</strong>されます。
+                    あなた自身の契約・鍵で利用してください。
+                  </span>
+                  <br />
+                  AI 呼び出し時のみ、選択プロバイダへ直接リクエストが送信されます
+                  (アプリの運営サーバは経由しません)。
                 </p>
               </div>
               <label className="inline-flex items-center gap-2 flex-shrink-0">
@@ -278,40 +284,25 @@ export default function SettingsPage() {
               />
             </div>
 
-            {/* 詳細設定 */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1">
-                  温度(創造性 0〜2)
-                </label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  value={settings.temperature ?? 0.7}
-                  onChange={(e) =>
-                    persist({ ...settings, temperature: Number(e.target.value) })
-                  }
-                  className="bg-background border-input h-9"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1">
-                  最大トークン
-                </label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={8192}
-                  step={1}
-                  value={settings.maxTokens ?? 1024}
-                  onChange={(e) =>
-                    persist({ ...settings, maxTokens: Number(e.target.value) })
-                  }
-                  className="bg-background border-input h-9"
-                />
-              </div>
+            {/* 詳細設定(温度のみ。トークン上限はアプリ側では設けない) */}
+            <div>
+              <label className="block text-xs font-medium text-foreground mb-1">
+                温度(創造性 0〜2)
+              </label>
+              <Input
+                type="number"
+                min={0}
+                max={2}
+                step={0.1}
+                value={settings.temperature ?? 0.7}
+                onChange={(e) =>
+                  persist({ ...settings, temperature: Number(e.target.value) })
+                }
+                className="bg-background border-input h-9 max-w-[120px]"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                低いほど一貫性重視、高いほど多様な文章になります
+              </p>
             </div>
 
             {loading && (
