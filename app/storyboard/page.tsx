@@ -8,10 +8,11 @@ import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Vid
 import { Sidebar } from '@/components/sidebar'
 import { SceneExportDialog } from '@/components/scene-export-dialog'
 import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
-import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle } from '@/types/db'
+import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, SceneCastMember } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
   deleteScene,
+  deleteSceneCastMember,
   deleteSceneDialogue,
   getAllAudioFiles,
   getAllBgmTracks,
@@ -19,12 +20,14 @@ import {
   getAllDialogues,
   getAllExpressions,
   getAllIllustrations,
+  getAllSceneCast,
   getAllSceneDialogues,
   getAllScenes,
   getAllSoundEffects,
   getLayersByIllustration,
   getTelopStyle,
   saveScene,
+  saveSceneCastMember,
   saveSceneDialogue,
   saveScenesBatch,
   saveTelopStyle,
@@ -47,6 +50,7 @@ export default function StoryboardPage() {
   const [illustrations, setIllustrations] = useState<IllustrationWithLayers[]>([])
   const [bgmTracks, setBgmTracks] = useState<BgmTrack[]>([])
   const [sounds, setSounds] = useState<SoundEffect[]>([])
+  const [cast, setCast] = useState<SceneCastMember[]>([])
   const [loading, setLoading] = useState(true)
   const [showSceneForm, setShowSceneForm] = useState(false)
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null)
@@ -71,7 +75,7 @@ export default function StoryboardPage() {
 
   async function loadAll() {
     try {
-      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts, allBgm, allSe, savedTelop] = await Promise.all([
+      const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts, allBgm, allSe, savedTelop, allCast] = await Promise.all([
         getAllScenes(),
         getAllSceneDialogues(),
         getAllDialogues(),
@@ -82,6 +86,7 @@ export default function StoryboardPage() {
         getAllBgmTracks(),
         getAllSoundEffects(),
         getTelopStyle(),
+        getAllSceneCast(),
       ])
       const withLayers: IllustrationWithLayers[] = await Promise.all(
         illusts.map(async (i) => ({
@@ -106,6 +111,7 @@ export default function StoryboardPage() {
       setBgmTracks(allBgm)
       setSounds(allSe)
       setTelopStyle(savedTelop)
+      setCast(allCast)
     } catch (e) {
       console.error('[anime-app] load storyboard failed', e)
     } finally {
@@ -116,6 +122,49 @@ export default function StoryboardPage() {
   function bgmForScene(scene: Scene): BgmTrack | null {
     if (!scene.bgm_track_id) return null
     return bgmTracks.find((t) => t.id === scene.bgm_track_id) ?? null
+  }
+
+  function castForScene(sceneId: string): SceneCastMember[] {
+    return cast
+      .filter((c) => c.scene_id === sceneId)
+      .sort((a, b) => a.order_index - b.order_index)
+  }
+
+  async function handleAddCastMember(sceneId: string, characterId: string) {
+    if (!characterId) return
+    const sceneCast = castForScene(sceneId)
+    if (sceneCast.some((c) => c.character_id === characterId)) return // 重複不可
+    const maxOrder = sceneCast.reduce((m, c) => Math.max(m, c.order_index), -1)
+    const member: SceneCastMember = {
+      id: crypto.randomUUID(),
+      scene_id: sceneId,
+      character_id: characterId,
+      x: 0.5,
+      scale: 1.0,
+      idle_expression_id: null,
+      order_index: maxOrder + 1,
+      created_at: new Date().toISOString(),
+    }
+    await saveSceneCastMember(member)
+    setCast((prev) => [...prev, member])
+  }
+
+  function updateCastMember(memberId: string, patch: Partial<SceneCastMember>) {
+    setCast((prev) =>
+      prev.map((c) => {
+        if (c.id !== memberId) return c
+        const merged = { ...c, ...patch }
+        saveSceneCastMember(merged).catch((e) =>
+          console.error('[anime-app] save cast member failed', e),
+        )
+        return merged
+      }),
+    )
+  }
+
+  async function handleDeleteCastMember(memberId: string) {
+    await deleteSceneCastMember(memberId)
+    setCast((prev) => prev.filter((c) => c.id !== memberId))
   }
 
   function backgroundLayersForScene(scene: Scene): Layer[] {
@@ -492,7 +541,158 @@ export default function StoryboardPage() {
                           </p>
 
                           {selectedSceneId === scene.id && (
-                            <div className="mt-4 pt-4 border-t border-border space-y-3">
+                            <div className="mt-4 pt-4 border-t border-border space-y-4">
+                              {/* ===== 登場キャラ(scene_cast) ===== */}
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <h5 className="font-medium text-foreground">登場キャラ</h5>
+                                  <select
+                                    value=""
+                                    onChange={(e) => {
+                                      if (e.target.value) {
+                                        handleAddCastMember(scene.id, e.target.value)
+                                        e.target.value = ''
+                                      }
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="px-2 py-1 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                  >
+                                    <option value="">+ キャラ追加</option>
+                                    {characters
+                                      .filter(
+                                        (c) =>
+                                          !castForScene(scene.id).some((m) => m.character_id === c.id),
+                                      )
+                                      .map((c) => (
+                                        <option key={c.id} value={c.id}>
+                                          {c.name}
+                                        </option>
+                                      ))}
+                                  </select>
+                                </div>
+                                {castForScene(scene.id).length === 0 ? (
+                                  <p className="text-xs text-muted-foreground">
+                                    登場キャラがありません。キャストを追加すると、その配置が全セリフに適用されます
+                                  </p>
+                                ) : (
+                                  <div className="space-y-2">
+                                    {castForScene(scene.id).map((member) => {
+                                      const char = characters.find((c) => c.id === member.character_id)
+                                      const charExprs = expressions.filter(
+                                        (e) => e.character_id === member.character_id,
+                                      )
+                                      const mx = member.x
+                                      const ms = member.scale
+                                      const mPos: 'left' | 'center' | 'right' =
+                                        mx < 0.35 ? 'left' : mx > 0.65 ? 'right' : 'center'
+                                      const mSize: 'small' | 'medium' | 'large' =
+                                        ms < 0.7 ? 'small' : ms < 0.95 ? 'medium' : 'large'
+                                      const btn = (active: boolean) =>
+                                        `px-2 py-0.5 text-xs rounded border transition ${
+                                          active
+                                            ? 'bg-primary/20 border-primary/40 text-primary'
+                                            : 'bg-card border-input text-muted-foreground hover:bg-primary/10'
+                                        }`
+                                      return (
+                                        <div
+                                          key={member.id}
+                                          className="p-2 bg-background rounded border border-border space-y-2"
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          <div className="flex items-center justify-between gap-2">
+                                            <p className="text-sm font-medium text-foreground truncate">
+                                              {char?.name ?? '(削除済み)'}
+                                            </p>
+                                            <button
+                                              onClick={() => handleDeleteCastMember(member.id)}
+                                              className="p-1 hover:bg-destructive/20 rounded transition flex-shrink-0"
+                                              title="キャストから外す"
+                                            >
+                                              <Trash2 size={14} className="text-destructive" />
+                                            </button>
+                                          </div>
+                                          <div className="flex items-center gap-2 flex-wrap text-xs">
+                                            <span className="text-muted-foreground">位置</span>
+                                            <button
+                                              type="button"
+                                              onClick={() => updateCastMember(member.id, { x: 0.25 })}
+                                              className={btn(mPos === 'left')}
+                                            >
+                                              左
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => updateCastMember(member.id, { x: 0.5 })}
+                                              className={btn(mPos === 'center')}
+                                            >
+                                              中
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => updateCastMember(member.id, { x: 0.75 })}
+                                              className={btn(mPos === 'right')}
+                                            >
+                                              右
+                                            </button>
+                                            <span className="text-muted-foreground">|</span>
+                                            <span className="text-muted-foreground">サイズ</span>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateCastMember(member.id, { scale: 0.55 })
+                                              }
+                                              className={btn(mSize === 'small')}
+                                            >
+                                              小
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateCastMember(member.id, { scale: 0.8 })
+                                              }
+                                              className={btn(mSize === 'medium')}
+                                            >
+                                              中
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                updateCastMember(member.id, { scale: 1.0 })
+                                              }
+                                              className={btn(mSize === 'large')}
+                                            >
+                                              大
+                                            </button>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-xs text-muted-foreground flex-shrink-0">
+                                              アイドル表情
+                                            </span>
+                                            <select
+                                              value={member.idle_expression_id ?? ''}
+                                              onChange={(e) =>
+                                                updateCastMember(member.id, {
+                                                  idle_expression_id: e.target.value || null,
+                                                })
+                                              }
+                                              className="flex-1 min-w-0 px-2 py-1 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                            >
+                                              <option value="">自動(口閉じ優先)</option>
+                                              {charExprs.map((e) => (
+                                                <option key={e.id} value={e.id}>
+                                                  {e.name}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* ===== セリフ ===== */}
                               <h5 className="font-medium text-foreground">シーン内のセリフ</h5>
                               {scene.dialogues && scene.dialogues.length > 0 ? (
                                 <div className="space-y-2">
@@ -762,6 +962,7 @@ export default function StoryboardPage() {
               }
               sounds={sounds}
               telopStyle={telopStyle}
+              sceneCast={playScene ? castForScene(playScene.id) : []}
               onClose={() => setPlayingSceneId(null)}
             />
             <SceneExportDialog
@@ -778,6 +979,7 @@ export default function StoryboardPage() {
               }
               sounds={sounds}
               telopStyle={telopStyle}
+              sceneCast={exportScene ? castForScene(exportScene.id) : []}
               open={!!exportingSceneId}
               onClose={() => setExportingSceneId(null)}
             />
@@ -809,6 +1011,15 @@ interface SceneDialogueResolved {
   seVolume: number
   characterX: number
   characterScale: number
+  extras: StageExtraResolved[]
+}
+
+interface StageExtraResolved {
+  character: Character
+  expressions: CharacterExpression[]
+  x: number
+  scale: number
+  idleExpressionId: string | null
 }
 
 function ScenePlayerDialog({
@@ -821,6 +1032,7 @@ function ScenePlayerDialog({
   bgmVolume,
   sounds,
   telopStyle,
+  sceneCast,
   onClose,
 }: {
   scene: SceneWithDialogues | null
@@ -832,6 +1044,7 @@ function ScenePlayerDialog({
   bgmVolume: number
   sounds: SoundEffect[]
   telopStyle: TelopStyle
+  sceneCast: SceneCastMember[]
   onClose: () => void
 }) {
   const [index, setIndex] = useState(0)
@@ -886,8 +1099,29 @@ function ScenePlayerDialog({
         : []
       const se = sd.se_id ? sounds.find((s) => s.id === sd.se_id) ?? null : null
       const seVolume = typeof sd.se_volume === 'number' ? sd.se_volume : 1
-      const characterX = typeof sd.character_x === 'number' ? sd.character_x : 0.5
-      const characterScale = typeof sd.character_scale === 'number' ? sd.character_scale : 1.0
+      // キャストに発話者がいればその座標を優先、無ければ A2 のセリフ設定
+      const speakerCast = sceneCast.find((m) => m.character_id === d.character_id)
+      const characterX =
+        speakerCast?.x ??
+        (typeof sd.character_x === 'number' ? sd.character_x : 0.5)
+      const characterScale =
+        speakerCast?.scale ??
+        (typeof sd.character_scale === 'number' ? sd.character_scale : 1.0)
+      // 共演者(キャスト - 発話者)
+      const extras: StageExtraResolved[] = sceneCast
+        .filter((m) => m.character_id !== d.character_id)
+        .map((m) => {
+          const c = characters.find((ch) => ch.id === m.character_id)
+          if (!c) return null
+          return {
+            character: c,
+            expressions: expressions.filter((e) => e.character_id === m.character_id),
+            x: m.x,
+            scale: m.scale,
+            idleExpressionId: m.idle_expression_id,
+          }
+        })
+        .filter((x): x is StageExtraResolved => x !== null)
       return {
         text: d.text,
         character,
@@ -898,6 +1132,7 @@ function ScenePlayerDialog({
         seVolume,
         characterX,
         characterScale,
+        extras,
       } satisfies SceneDialogueResolved
     })
     .filter((x): x is SceneDialogueResolved => x !== null && x.audio !== null && x.character !== null)
@@ -954,6 +1189,7 @@ function ScenePlayerDialog({
                 backgroundLayers={backgroundLayers}
                 characterX={current?.characterX ?? 0.5}
                 characterScale={current?.characterScale ?? 1.0}
+                extraCharacters={current?.extras ?? []}
                 playing={playing}
                 onEnded={handleEnded}
               />

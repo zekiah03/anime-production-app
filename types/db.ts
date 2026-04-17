@@ -136,6 +136,20 @@ export interface SceneWithDialogues extends Scene {
   >
 }
 
+// シーンの「登場キャラ」。 speaker 以外は無音で立ち、speaker はリップシンクする。
+export interface SceneCastMember {
+  id: string
+  scene_id: string
+  character_id: string
+  x: number // 0..1, 0.5=中央
+  scale: number // 1.0=縦いっぱい
+  // 喋ってないときに表示する表情 id。未指定なら mouth_closed → メイン画像 の順でフォールバック
+  idle_expression_id: string | null
+  // 描画順(小さいほど奥)
+  order_index: number
+  created_at: string
+}
+
 // イラスト(複数レイヤーを持つ1枚の絵)
 export interface Illustration {
   id: string

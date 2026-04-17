@@ -6,6 +6,15 @@ import type { Character, CharacterExpression, Layer, TelopStyle } from '@/types/
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import { toBandStyle, toTextStyle } from '@/components/telop-settings-dialog'
 
+// 発話しない共演キャラ(静止画で並べる)
+export interface StageExtraCharacter {
+  character: Character
+  expressions: CharacterExpression[]
+  x: number
+  scale: number
+  idleExpressionId: string | null
+}
+
 interface LipSyncStageProps {
   character: Character | null
   expressions: CharacterExpression[] // このキャラに紐づく表情のみ
@@ -20,8 +29,20 @@ interface LipSyncStageProps {
   // 立ち位置 (0..1, 0.5=中央) と縦方向スケール (1.0=ステージ高さいっぱい)
   characterX?: number
   characterScale?: number
+  // 発話者以外の共演キャラ。 background と main character の間に描画する。
+  extraCharacters?: StageExtraCharacter[]
   onEnded?: () => void
   className?: string
+}
+
+function pickIdleImage(extra: StageExtraCharacter): string | null {
+  if (extra.idleExpressionId) {
+    const found = extra.expressions.find((e) => e.id === extra.idleExpressionId)
+    if (found) return found.image_url
+  }
+  const mc = extra.expressions.find((e) => e.kind === 'mouth_closed')
+  if (mc) return mc.image_url
+  return extra.character.image_url
 }
 
 // 音声に合わせて「口開け/口閉じ」画像をパッと切り替えるコンポーネント。
@@ -38,6 +59,7 @@ export function LipSyncStage({
   backgroundLayers,
   characterX,
   characterScale,
+  extraCharacters,
   onEnded,
   className,
 }: LipSyncStageProps) {
@@ -207,6 +229,29 @@ export function LipSyncStage({
           style={{ opacity: layer.opacity }}
         />
       ))}
+      {/* 共演キャラ(静止画)は背景の上・発話者の下に描画する */}
+      {extraCharacters?.map((extra) => {
+        const url = pickIdleImage(extra)
+        if (!url) return null
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={extra.character.id}
+            src={url}
+            alt={extra.character.name}
+            className="absolute"
+            style={{
+              bottom: 0,
+              left: `${extra.x * 100}%`,
+              height: `${extra.scale * 100}%`,
+              width: 'auto',
+              maxWidth: 'none',
+              transform: 'translateX(-50%)',
+              objectFit: 'contain',
+            }}
+          />
+        )
+      })}
       {img ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img

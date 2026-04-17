@@ -11,6 +11,7 @@ import type {
   Dialogue,
   Scene,
   SceneDialogue,
+  SceneCastMember,
   SoundEffect,
   Illustration,
   Layer,
@@ -19,7 +20,7 @@ import type {
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 
 const DB_NAME = 'anime-production'
-const DB_VERSION = 5
+const DB_VERSION = 6
 
 // 永続化形式 (file_url / image_url は実行時に Blob から生成するので保存しない)
 type StoredCharacter = Omit<Character, 'image_url'> & { image_blob?: Blob }
@@ -62,6 +63,12 @@ interface AnimeDB extends DBSchema {
   sound_effects: { key: string; value: StoredSoundEffect }
   // settings: id をキーにした singleton。今は 'telop' のみ
   settings: { key: string; value: { id: string; telop_style?: TelopStyle } }
+  // シーンの登場キャラ(複数キャラを同時配置)
+  scene_cast: {
+    key: string
+    value: SceneCastMember
+    indexes: { by_scene: string; by_character: string }
+  }
 }
 
 let dbPromise: Promise<IDBPDatabase<AnimeDB>> | null = null
@@ -112,6 +119,11 @@ function getDB() {
         if (!db.objectStoreNames.contains('settings')) {
           db.createObjectStore('settings', { keyPath: 'id' })
         }
+        if (!db.objectStoreNames.contains('scene_cast')) {
+          const store = db.createObjectStore('scene_cast', { keyPath: 'id' })
+          store.createIndex('by_scene', 'scene_id')
+          store.createIndex('by_character', 'character_id')
+        }
       },
     })
   }
@@ -144,9 +156,9 @@ export async function saveCharacter(character: Character): Promise<void> {
 
 export async function deleteCharacter(id: string): Promise<void> {
   const db = await getDB()
-  // 関連する audio_files / dialogues の character_id を null にする / expressions は削除
+  // 関連する audio_files / dialogues の character_id を null / expressions と scene_cast は削除
   const tx = db.transaction(
-    ['characters', 'audio_files', 'dialogues', 'character_expressions'],
+    ['characters', 'audio_files', 'dialogues', 'character_expressions', 'scene_cast'],
     'readwrite',
   )
   await tx.objectStore('characters').delete(id)
@@ -161,6 +173,10 @@ export async function deleteCharacter(id: string): Promise<void> {
   }
   const exprIndex = tx.objectStore('character_expressions').index('by_character')
   for await (const cursor of exprIndex.iterate(id)) {
+    await cursor.delete()
+  }
+  const castIndex = tx.objectStore('scene_cast').index('by_character')
+  for await (const cursor of castIndex.iterate(id)) {
     await cursor.delete()
   }
   await tx.done
@@ -294,12 +310,16 @@ export async function saveScenesBatch(scenes: Scene[]): Promise<void> {
 
 export async function deleteScene(id: string): Promise<void> {
   const db = await getDB()
-  // 関連する scene_dialogues も削除
-  const tx = db.transaction(['scenes', 'scene_dialogues'], 'readwrite')
+  // 関連する scene_dialogues / scene_cast も削除
+  const tx = db.transaction(['scenes', 'scene_dialogues', 'scene_cast'], 'readwrite')
   await tx.objectStore('scenes').delete(id)
 
   const sdIndex = tx.objectStore('scene_dialogues').index('by_scene')
   for await (const cursor of sdIndex.iterate(id)) {
+    await cursor.delete()
+  }
+  const castIndex = tx.objectStore('scene_cast').index('by_scene')
+  for await (const cursor of castIndex.iterate(id)) {
     await cursor.delete()
   }
   await tx.done
@@ -467,6 +487,29 @@ export async function deleteSoundEffect(id: string): Promise<void> {
     }
   }
   await tx.done
+}
+
+// ==================== Scene Cast ====================
+
+export async function getAllSceneCast(): Promise<SceneCastMember[]> {
+  const db = await getDB()
+  return db.getAll('scene_cast')
+}
+
+export async function getSceneCast(sceneId: string): Promise<SceneCastMember[]> {
+  const db = await getDB()
+  const all = await db.getAllFromIndex('scene_cast', 'by_scene', sceneId)
+  return all.sort((a, b) => a.order_index - b.order_index)
+}
+
+export async function saveSceneCastMember(member: SceneCastMember): Promise<void> {
+  const db = await getDB()
+  await db.put('scene_cast', member)
+}
+
+export async function deleteSceneCastMember(id: string): Promise<void> {
+  const db = await getDB()
+  await db.delete('scene_cast', id)
 }
 
 // ==================== Settings (singleton) ====================

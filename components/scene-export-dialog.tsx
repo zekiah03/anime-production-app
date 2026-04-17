@@ -16,12 +16,20 @@ import type {
   Character,
   CharacterExpression,
   Layer,
+  SceneCastMember,
   SceneWithDialogues,
   SoundEffect,
   TelopStyle,
 } from '@/types/db'
 import { DEFAULT_TELOP_STYLE, TELOP_FONT_FAMILY } from '@/types/db'
 import { hexToRgba } from '@/components/telop-settings-dialog'
+
+interface ExportExtra {
+  character: Character
+  x: number
+  scale: number
+  imageUrl: string // アイドル表情(or main image)
+}
 
 interface ResolvedDialogue {
   text: string
@@ -35,6 +43,7 @@ interface ResolvedDialogue {
   seVolume: number
   characterX: number
   characterScale: number
+  extras: ExportExtra[]
 }
 
 // 書き出し解像度は縦型ショート動画を意識した 9:16。将来 UI で切替可能にしてもよい。
@@ -55,6 +64,7 @@ export function SceneExportDialog({
   bgmVolume,
   sounds,
   telopStyle,
+  sceneCast,
   open,
   onClose,
 }: {
@@ -67,10 +77,23 @@ export function SceneExportDialog({
   bgmVolume: number
   sounds: SoundEffect[]
   telopStyle?: TelopStyle | null
+  sceneCast: SceneCastMember[]
   open: boolean
   onClose: () => void
 }) {
   const effectiveStyle: TelopStyle = telopStyle ?? DEFAULT_TELOP_STYLE
+
+  function pickIdleUrl(member: SceneCastMember): string | null {
+    const charExprs = expressions.filter((e) => e.character_id === member.character_id)
+    if (member.idle_expression_id) {
+      const found = charExprs.find((e) => e.id === member.idle_expression_id)
+      if (found) return found.image_url
+    }
+    const mc = charExprs.find((e) => e.kind === 'mouth_closed')
+    if (mc) return mc.image_url
+    const c = characters.find((ch) => ch.id === member.character_id)
+    return c?.image_url ?? null
+  }
   const [status, setStatus] = useState<Status>('idle')
   const [progressIndex, setProgressIndex] = useState(0)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -90,8 +113,23 @@ export function SceneExportDialog({
           const charExpressions = expressions.filter((x) => x.character_id === character.id)
           const se = sd.se_id ? sounds.find((s) => s.id === sd.se_id) ?? null : null
           const seVolume = typeof sd.se_volume === 'number' ? sd.se_volume : 1
-          const characterX = typeof sd.character_x === 'number' ? sd.character_x : 0.5
-          const characterScale = typeof sd.character_scale === 'number' ? sd.character_scale : 1.0
+          // キャストに speaker がいればその位置を優先
+          const speakerCast = sceneCast.find((m) => m.character_id === d.character_id)
+          const characterX =
+            speakerCast?.x ??
+            (typeof sd.character_x === 'number' ? sd.character_x : 0.5)
+          const characterScale =
+            speakerCast?.scale ??
+            (typeof sd.character_scale === 'number' ? sd.character_scale : 1.0)
+          const extras: ExportExtra[] = sceneCast
+            .filter((m) => m.character_id !== d.character_id)
+            .map((m) => {
+              const c = characters.find((ch) => ch.id === m.character_id)
+              const url = pickIdleUrl(m)
+              if (!c || !url) return null
+              return { character: c, x: m.x, scale: m.scale, imageUrl: url }
+            })
+            .filter((x): x is ExportExtra => x !== null)
           return {
             text: d.text,
             character,
@@ -106,6 +144,7 @@ export function SceneExportDialog({
             seVolume,
             characterX,
             characterScale,
+            extras,
           } as ResolvedDialogue
         })
         .filter((x): x is ResolvedDialogue => x !== null)
@@ -161,6 +200,21 @@ export function SceneExportDialog({
         ctx.drawImage(bg, x, y, w, h)
         ctx.globalAlpha = prevAlpha
       }
+    }
+
+    // 共演者(発話しない):背景の上・発話者の下に描画する
+    for (const extra of current.extras) {
+      const extraImg = cache.get(extra.imageUrl)
+      if (!extraImg) continue
+      const fit = Math.min(WIDTH / extraImg.width, HEIGHT / extraImg.height)
+      const baseW = extraImg.width * fit
+      const baseH = extraImg.height * fit
+      const w = baseW * extra.scale
+      const h = baseH * extra.scale
+      const cx = WIDTH * extra.x
+      const x = cx - w / 2
+      const y = HEIGHT - h
+      ctx.drawImage(extraImg, x, y, w, h)
     }
 
     let imgUrl: string | null = null
@@ -269,6 +323,7 @@ export function SceneExportDialog({
       if (q.mouthClosed) urls.add(q.mouthClosed.image_url)
       if (q.blink) urls.add(q.blink.image_url)
       if (q.override) urls.add(q.override.image_url)
+      q.extras.forEach((ex) => urls.add(ex.imageUrl))
     })
     backgroundLayers.forEach((l) => urls.add(l.image_url))
 
