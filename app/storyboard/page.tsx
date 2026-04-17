@@ -114,6 +114,17 @@ export default function StoryboardPage() {
     loadAll()
   }, [])
 
+  // 展開中のシーンへスクロール(allExpanded 中は無効: 全展開時にジャンプされると逆に迷子になる)
+  useEffect(() => {
+    if (!selectedSceneId || allExpanded) return
+    const el = document.querySelector(
+      `[data-scene-id="${selectedSceneId}"]`,
+    ) as HTMLElement | null
+    if (el) {
+      el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }
+  }, [selectedSceneId, allExpanded])
+
   async function loadAll() {
     try {
       const [rawScenes, sceneDialogues, allDialogues, allCharacters, allAudio, allExpressions, illusts, allBgm, allSe, savedTelop, allCast, loadedVideos, loadedPresets] = await Promise.all([
@@ -673,6 +684,67 @@ export default function StoryboardPage() {
         )
         return merged
       }),
+    )
+  }
+
+  // キャストを横一列に等間隔で自動配置(order_index 順。1人=0.5、2人=0.3/0.7、3人=0.2/0.5/0.8 ...)
+  async function handleAutoArrangeCast(sceneId: string) {
+    const members = castForScene(sceneId)
+    const n = members.length
+    if (n === 0) return
+    const margin = 0.18
+    const positions =
+      n === 1
+        ? [0.5]
+        : Array.from({ length: n }, (_, i) => margin + (i * (1 - 2 * margin)) / (n - 1))
+    const updates: SceneCastMember[] = members.map((m, i) => ({
+      ...m,
+      x: positions[i],
+      // 2人以上なら中央より左は右向き、右は左向きにして向き合わせる
+      flipped: n >= 2 ? positions[i] > 0.5 : !!m.flipped,
+    }))
+    await Promise.all(updates.map((u) => saveSceneCastMember(u)))
+    setCast((prev) => {
+      const map = new Map(updates.map((u) => [u.id, u]))
+      return prev.map((c) => map.get(c.id) ?? c)
+    })
+  }
+
+  // シーン内の全セリフの再生時間(duration_ms)に倍率を掛ける。
+  // 倍率 < 1 = 早口、> 1 = ゆっくり。音声があるセリフは duration_ms を持たないため対象外(無音ナレーションのみ)。
+  async function handleScaleSceneDurations(sceneId: string, factor: number) {
+    const scene = scenes.find((s) => s.id === sceneId)
+    if (!scene || !Number.isFinite(factor) || factor <= 0) return
+    const now = new Date().toISOString()
+    const updated: Dialogue[] = []
+    for (const sd of scene.dialogues) {
+      const d = sd.dialogue
+      if (!d || typeof d.duration_ms !== 'number') continue
+      const next = Math.max(300, Math.round(d.duration_ms * factor))
+      if (next === d.duration_ms) continue
+      const u: Dialogue = { ...d, duration_ms: next, updated_at: now }
+      await saveDialogue(u)
+      updated.push(u)
+    }
+    if (updated.length === 0) {
+      alert('このシーンには倍率調整できる(音声なしの)セリフがありません')
+      return
+    }
+    const map = new Map(updated.map((d) => [d.id, d]))
+    setDialogues((prev) => prev.map((d) => map.get(d.id) ?? d))
+    setScenes((prev) =>
+      prev.map((s) =>
+        s.id === sceneId
+          ? {
+              ...s,
+              dialogues: s.dialogues.map((sd) =>
+                sd.dialogue && map.has(sd.dialogue.id)
+                  ? { ...sd, dialogue: map.get(sd.dialogue.id)! }
+                  : sd,
+              ),
+            }
+          : s,
+      ),
     )
   }
 
@@ -1966,6 +2038,7 @@ export default function StoryboardPage() {
                   {filteredScenes.map((scene, index) => (
                     <Card
                       key={scene.id}
+                      data-scene-id={scene.id}
                       draggable
                       onDragStart={() => setDraggedSceneId(scene.id)}
                       onDragOver={(e) => e.preventDefault()}
@@ -2146,6 +2219,15 @@ export default function StoryboardPage() {
                                       title="現在のキャストをプリセットとして保存"
                                     >
                                       プリセット保存
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAutoArrangeCast(scene.id)}
+                                      disabled={castForScene(scene.id).length === 0}
+                                      className="px-2 py-1 text-xs rounded border border-input text-foreground hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                                      title="キャストを横一列に等間隔で自動配置(2人以上なら向かい合う)"
+                                    >
+                                      自動配置
                                     </button>
                                     <select
                                       value=""
@@ -2617,6 +2699,39 @@ export default function StoryboardPage() {
                                 >
                                   スクリプト貼付
                                 </Button>
+                              </div>
+                              {/* セリフ再生時間の一括倍率(音声なしセリフが対象) */}
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <span>このシーンの尺:</span>
+                                {[
+                                  { f: 0.75, label: '×0.75(速)' },
+                                  { f: 1.25, label: '×1.25(遅)' },
+                                  { f: 1.5, label: '×1.5' },
+                                ].map((b) => (
+                                  <button
+                                    key={b.f}
+                                    type="button"
+                                    onClick={() => handleScaleSceneDurations(scene.id, b.f)}
+                                    className="px-2 py-0.5 rounded border border-input hover:bg-primary/10 text-foreground"
+                                    title={`音声なしセリフの duration_ms を ${b.f}倍`}
+                                  >
+                                    {b.label}
+                                  </button>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const v = window.prompt('倍率を入力(例: 0.5 / 2.0)', '1.0')
+                                    const f = Number(v)
+                                    if (v != null && Number.isFinite(f) && f > 0) {
+                                      handleScaleSceneDurations(scene.id, f)
+                                    }
+                                  }}
+                                  className="px-2 py-0.5 rounded border border-input hover:bg-primary/10 text-foreground"
+                                  title="任意の倍率"
+                                >
+                                  任意…
+                                </button>
                               </div>
                               {/* ナレーション追加(キャラなし字幕) */}
                               <div className="space-y-2 p-2 bg-background rounded border border-dashed border-border">
