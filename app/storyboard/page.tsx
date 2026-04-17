@@ -4,11 +4,12 @@ import { useEffect, useRef, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video as VideoIcon, Type, FlipHorizontal, ChevronDown, ChevronUp, Minimize2, Pencil, Folder, FolderPlus } from 'lucide-react'
+import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video as VideoIcon, Type, FlipHorizontal, ChevronDown, ChevronUp, Minimize2, Pencil, Folder, FolderPlus, Copy, Clock } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar'
 import { SceneExportDialog } from '@/components/scene-export-dialog'
 import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
 import { SceneTimelineBar, type TimelineClip } from '@/components/scene-timeline'
+import { VideoExportDialog } from '@/components/video-export-dialog'
 import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, SceneCastMember, Video } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
@@ -76,6 +77,7 @@ export default function StoryboardPage() {
   const [draggedSceneId, setDraggedSceneId] = useState<string | null>(null)
   const [playingSceneId, setPlayingSceneId] = useState<string | null>(null)
   const [exportingSceneId, setExportingSceneId] = useState<string | null>(null)
+  const [exportingVideoId, setExportingVideoId] = useState<string | null>(null)
   const [telopStyle, setTelopStyle] = useState<TelopStyle>(DEFAULT_TELOP_STYLE)
   const [showTelopSettings, setShowTelopSettings] = useState(false)
   // ナレーション追加フォーム(展開中のシーンに対して使う)
@@ -221,6 +223,123 @@ export default function StoryboardPage() {
     )
     // 削除後は先頭の動画を選択(なければ null = 未分類)
     setSelectedVideoId(videos.find((v) => v.id !== id)?.id ?? null)
+  }
+
+  // シーン複製: Scene 本体 + その scene_cast + scene_dialogues を新 id で複製(Dialogue は共有)
+  async function handleDuplicateScene(sceneId: string) {
+    const source = scenes.find((s) => s.id === sceneId)
+    if (!source) return
+    const now = new Date().toISOString()
+    const sameVideoScenes = scenes
+      .filter((s) => (s.video_id ?? null) === (source.video_id ?? null))
+      .sort((a, b) => a.order_index - b.order_index)
+    const maxOrder =
+      sameVideoScenes.length > 0
+        ? sameVideoScenes[sameVideoScenes.length - 1].order_index
+        : -1
+    const newSceneId = crypto.randomUUID()
+    const newScene: Scene = {
+      id: newSceneId,
+      title: (source.title ?? '') + ' (コピー)',
+      description: source.description,
+      background_illustration_id: source.background_illustration_id,
+      bgm_track_id: source.bgm_track_id,
+      bgm_volume: source.bgm_volume,
+      video_id: source.video_id ?? null,
+      order_index: maxOrder + 1,
+      created_at: now,
+      updated_at: now,
+    }
+    await saveScene(newScene)
+
+    // キャスト複製
+    const sourceCast = cast.filter((c) => c.scene_id === sceneId)
+    const newCastMembers: SceneCastMember[] = sourceCast.map((c) => ({
+      ...c,
+      id: crypto.randomUUID(),
+      scene_id: newSceneId,
+      created_at: now,
+    }))
+    await Promise.all(newCastMembers.map((c) => saveSceneCastMember(c)))
+
+    // セリフ複製(SceneDialogue のみ新しい id。Dialogue 自体は共有)
+    const newSds = source.dialogues.map((sd) => ({
+      id: crypto.randomUUID(),
+      scene_id: newSceneId,
+      dialogue_id: sd.dialogue_id,
+      order_index: sd.order_index,
+      se_id: sd.se_id ?? null,
+      se_volume: typeof sd.se_volume === 'number' ? sd.se_volume : 1,
+      character_x: typeof sd.character_x === 'number' ? sd.character_x : 0.5,
+      character_scale:
+        typeof sd.character_scale === 'number' ? sd.character_scale : 1.0,
+      character_flipped: sd.character_flipped ?? false,
+      created_at: now,
+      dialogue: sd.dialogue,
+    }))
+    await Promise.all(
+      newSds.map((sd) => {
+        const { dialogue: _d, ...row } = sd
+        void _d
+        return saveSceneDialogue(row)
+      }),
+    )
+
+    setScenes((prev) => [
+      ...prev,
+      {
+        ...newScene,
+        dialogues: newSds,
+      },
+    ])
+    setCast((prev) => [...prev, ...newCastMembers])
+  }
+
+  // セリフ複製: 下敷きの Dialogue も新しい id で複製し、完全に独立したコピーにする
+  async function handleDuplicateDialogue(sceneId: string, sdId: string) {
+    const scene = scenes.find((s) => s.id === sceneId)
+    const sd = scene?.dialogues.find((d) => d.id === sdId)
+    if (!sd) return
+    const now = new Date().toISOString()
+
+    let newDialogue: Dialogue | null = null
+    if (sd.dialogue) {
+      newDialogue = {
+        ...sd.dialogue,
+        id: crypto.randomUUID(),
+        created_at: now,
+        updated_at: now,
+      }
+      await saveDialogue(newDialogue)
+    }
+
+    const maxOrder =
+      scene?.dialogues.reduce((m, d) => Math.max(m, d.order_index), -1) ?? -1
+    const newSd: SceneDialogue = {
+      id: crypto.randomUUID(),
+      scene_id: sceneId,
+      dialogue_id: newDialogue?.id ?? sd.dialogue_id,
+      order_index: maxOrder + 1,
+      se_id: sd.se_id ?? null,
+      se_volume: typeof sd.se_volume === 'number' ? sd.se_volume : 1,
+      character_x: typeof sd.character_x === 'number' ? sd.character_x : 0.5,
+      character_scale: typeof sd.character_scale === 'number' ? sd.character_scale : 1.0,
+      character_flipped: sd.character_flipped ?? false,
+      created_at: now,
+    }
+    await saveSceneDialogue(newSd)
+
+    if (newDialogue) setDialogues((prev) => [newDialogue as Dialogue, ...prev])
+    setScenes((prev) =>
+      prev.map((s) =>
+        s.id === sceneId
+          ? {
+              ...s,
+              dialogues: [...s.dialogues, { ...newSd, dialogue: newDialogue }],
+            }
+          : s,
+      ),
+    )
   }
 
   // ある動画にシーンを移す(シーン編集フォームから使う)
@@ -630,7 +749,20 @@ export default function StoryboardPage() {
               <h2 className="text-3xl font-bold text-foreground">ストーリーボード</h2>
               <p className="text-muted-foreground mt-1">シーンを構築してストーリーを作成</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                variant="outline"
+                onClick={() => selectedVideoId && setExportingVideoId(selectedVideoId)}
+                disabled={
+                  !selectedVideoId ||
+                  scenes.filter((s) => (s.video_id ?? null) === selectedVideoId).length === 0
+                }
+                className="gap-2"
+                title="この動画の全シーンを繋げて 1 本の動画に書き出す"
+              >
+                <VideoIcon size={16} />
+                動画を書き出す
+              </Button>
               <Button
                 variant="outline"
                 onClick={() => setShowTelopSettings(true)}
@@ -948,8 +1080,26 @@ export default function StoryboardPage() {
                             {scene.description && (
                               <p className="text-sm text-muted-foreground mt-1">{scene.description}</p>
                             )}
-                            <p className="text-xs text-muted-foreground mt-2">
-                              セリフ数: {scene.dialogues?.length || 0}
+                            <p className="text-xs text-muted-foreground mt-2 flex items-center gap-3 flex-wrap">
+                              <span>セリフ数: {scene.dialogues?.length || 0}</span>
+                              {(() => {
+                                const totalSec = buildTimelineClips(scene).reduce(
+                                  (sum, c) => sum + c.durationSec,
+                                  0,
+                                )
+                                return totalSec > 0 ? (
+                                  <span className="inline-flex items-center gap-1">
+                                    <Clock size={10} />
+                                    {totalSec.toFixed(1)}秒
+                                  </span>
+                                ) : null
+                              })()}
+                              {scene.bgm_track_id &&
+                                bgmTracks.find((b) => b.id === scene.bgm_track_id) && (
+                                  <span>
+                                    BGM: {bgmTracks.find((b) => b.id === scene.bgm_track_id)?.name}
+                                  </span>
+                                )}
                             </p>
                           </button>
 
@@ -1168,15 +1318,32 @@ export default function StoryboardPage() {
                                         onClick={(e) => e.stopPropagation()}
                                       >
                                         <div className="flex items-start justify-between gap-2">
-                                          <p className="text-foreground break-words flex-1 min-w-0">
-                                            {sd.dialogue?.text}
-                                          </p>
-                                          <button
-                                            onClick={() => handleRemoveDialogue(sd.id)}
-                                            className="flex-shrink-0 p-1 hover:bg-destructive/20 rounded transition"
-                                          >
-                                            <Trash2 size={14} className="text-destructive" />
-                                          </button>
+                                          <div className="flex-1 min-w-0">
+                                            {isNarration && (
+                                              <span className="inline-block text-[10px] px-1.5 py-0.5 bg-accent/20 text-accent rounded mr-2 align-middle">
+                                                ナレーション
+                                              </span>
+                                            )}
+                                            <span className="text-foreground break-words">
+                                              {sd.dialogue?.text}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-1 flex-shrink-0">
+                                            <button
+                                              onClick={() => handleDuplicateDialogue(scene.id, sd.id)}
+                                              className="p-1 hover:bg-primary/20 rounded transition"
+                                              title="このセリフを複製"
+                                            >
+                                              <Copy size={12} className="text-primary" />
+                                            </button>
+                                            <button
+                                              onClick={() => handleRemoveDialogue(sd.id)}
+                                              className="p-1 hover:bg-destructive/20 rounded transition"
+                                              title="シーンから外す"
+                                            >
+                                              <Trash2 size={14} className="text-destructive" />
+                                            </button>
+                                          </div>
                                         </div>
                                         <div className="flex items-center gap-2">
                                           <span className="text-xs text-muted-foreground flex-shrink-0">SE</span>
@@ -1437,6 +1604,13 @@ export default function StoryboardPage() {
                             <VideoIcon size={16} className="text-primary" />
                           </button>
                           <button
+                            onClick={() => handleDuplicateScene(scene.id)}
+                            className="p-2 hover:bg-primary/20 rounded-lg transition"
+                            title="シーンを複製(キャスト・セリフ構成ごと)"
+                          >
+                            <Copy size={16} className="text-primary" />
+                          </button>
+                          <button
                             onClick={() => handleEditScene(scene)}
                             className="p-2 hover:bg-primary/20 rounded-lg transition"
                           >
@@ -1533,6 +1707,22 @@ export default function StoryboardPage() {
                 setTelopStyle(next)
               }}
               onClose={() => setShowTelopSettings(false)}
+            />
+            <VideoExportDialog
+              videoName={videos.find((v) => v.id === exportingVideoId)?.name ?? '動画'}
+              scenes={scenes
+                .filter((s) => (s.video_id ?? null) === exportingVideoId)
+                .sort((a, b) => a.order_index - b.order_index)}
+              characters={characters}
+              audioFiles={audioFiles}
+              expressions={expressions}
+              bgmTracks={bgmTracks}
+              sounds={sounds}
+              illustrations={illustrations}
+              sceneCast={cast}
+              telopStyle={telopStyle}
+              open={!!exportingVideoId}
+              onClose={() => setExportingVideoId(null)}
             />
           </>
         )
