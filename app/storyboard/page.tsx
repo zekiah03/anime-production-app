@@ -85,6 +85,8 @@ export default function StoryboardPage() {
   const [exportingSceneId, setExportingSceneId] = useState<string | null>(null)
   const [exportingVideoId, setExportingVideoId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [replaceMode, setReplaceMode] = useState(false)
+  const [replaceQuery, setReplaceQuery] = useState('')
   // 複数シーンを選択して一括操作するためのセット(selectedSceneId は展開中の1シーン)
   const [checkedSceneIds, setCheckedSceneIds] = useState<Set<string>>(new Set())
   // 全シーン展開モード(全部の展開パネルを開く)
@@ -659,6 +661,53 @@ export default function StoryboardPage() {
     clearChecked()
   }
 
+  // 現在の動画のセリフに対して文字列置換を実行
+  async function handleReplaceAll() {
+    const q = searchQuery.trim()
+    if (!q) {
+      alert('検索文字列を入力してください')
+      return
+    }
+    if (!window.confirm(`この動画内のセリフに含まれる「${q}」を「${replaceQuery}」に置き換えます。続けますか?`)) return
+    const now = new Date().toISOString()
+    const scenesInVideo = scenes.filter((s) => (s.video_id ?? null) === selectedVideoId)
+    const affectedDialogueIds = new Set<string>()
+    for (const s of scenesInVideo) {
+      for (const sd of s.dialogues) {
+        if (sd.dialogue?.text.includes(q)) affectedDialogueIds.add(sd.dialogue.id)
+      }
+    }
+    if (affectedDialogueIds.size === 0) {
+      alert('該当するセリフが見つかりませんでした')
+      return
+    }
+    const updatedDialogues = new Map<string, Dialogue>()
+    for (const id of affectedDialogueIds) {
+      const d = dialogues.find((x) => x.id === id)
+      if (!d) continue
+      const newText = d.text.split(q).join(replaceQuery)
+      if (newText === d.text) continue
+      const updated: Dialogue = { ...d, text: newText, updated_at: now }
+      await saveDialogue(updated)
+      updatedDialogues.set(id, updated)
+    }
+    setDialogues((prev) =>
+      prev.map((d) => updatedDialogues.get(d.id) ?? d),
+    )
+    setScenes((prev) =>
+      prev.map((s) => ({
+        ...s,
+        dialogues: s.dialogues.map((sd) => ({
+          ...sd,
+          dialogue: sd.dialogue_id && updatedDialogues.has(sd.dialogue_id)
+            ? updatedDialogues.get(sd.dialogue_id) ?? sd.dialogue
+            : sd.dialogue,
+        })),
+      })),
+    )
+    alert(`${updatedDialogues.size}件のセリフを置換しました`)
+  }
+
   // 現在の動画の全シーンに対して BGM を一括適用
   async function handleApplyBulkBgm() {
     const targetScenes = scenes.filter((s) => (s.video_id ?? null) === selectedVideoId)
@@ -1206,13 +1255,37 @@ export default function StoryboardPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-1">シーンタイトル</label>
-                  <Input
-                    type="text"
-                    placeholder="例：オープニング"
-                    value={sceneFormData.title}
-                    onChange={(e) => setSceneFormData({ ...sceneFormData, title: e.target.value })}
-                    className="bg-background border-input"
-                  />
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      placeholder="例:オープニング"
+                      value={sceneFormData.title}
+                      onChange={(e) => setSceneFormData({ ...sceneFormData, title: e.target.value })}
+                      className="bg-background border-input flex-1"
+                    />
+                    {editingSceneId && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          const scene = scenes.find((s) => s.id === editingSceneId)
+                          const firstText = scene?.dialogues[0]?.dialogue?.text?.trim()
+                          if (!firstText) {
+                            alert('このシーンにはセリフがないためタイトルを生成できません')
+                            return
+                          }
+                          const short =
+                            firstText.length > 20 ? firstText.slice(0, 18) + '…' : firstText
+                          setSceneFormData({ ...sceneFormData, title: short })
+                        }}
+                        className="gap-1 flex-shrink-0"
+                        title="最初のセリフからタイトルを自動生成"
+                      >
+                        <Type size={14} />
+                        自動
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-foreground mb-1">説明</label>
@@ -1361,31 +1434,63 @@ export default function StoryboardPage() {
                 </div>
               </div>
 
-              {/* セリフ/タイトル検索 */}
-              <div className="flex items-center gap-2 mb-3">
-                <div className="flex-1 relative">
-                  <Search
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                  />
-                  <input
-                    ref={searchInputRef}
-                    type="text"
-                    placeholder="セリフ・シーンタイトルを検索(/で即フォーカス)"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-9 py-2 bg-background border border-input rounded-md text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-primary/20 rounded transition"
-                      title="クリア"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
+              {/* セリフ/タイトル検索 + 一括置換 */}
+              <div className="space-y-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 relative">
+                    <Search
+                      size={14}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      placeholder="セリフ・シーンタイトルを検索(/で即フォーカス)"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-9 pr-9 py-2 bg-background border border-input rounded-md text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-primary/20 rounded transition"
+                        title="クリア"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={replaceMode ? 'default' : 'outline'}
+                    onClick={() => setReplaceMode((v) => !v)}
+                    className="h-9 px-3 text-xs"
+                    title="セリフ一括置換"
+                  >
+                    置換
+                  </Button>
                 </div>
+                {replaceMode && (
+                  <div className="flex items-center gap-2 p-2 bg-background border border-dashed border-input rounded-md">
+                    <span className="text-xs text-muted-foreground flex-shrink-0">→</span>
+                    <input
+                      type="text"
+                      placeholder="置換後の文字列(空欄にすると削除)"
+                      value={replaceQuery}
+                      onChange={(e) => setReplaceQuery(e.target.value)}
+                      className="flex-1 px-3 py-1.5 bg-card border border-input rounded-md text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={handleReplaceAll}
+                      disabled={!searchQuery.trim()}
+                      className="h-8 px-3 text-xs flex-shrink-0"
+                      title="現在の動画内の全セリフで置換"
+                    >
+                      全置換
+                    </Button>
+                  </div>
+                )}
               </div>
 
               {/* 一括操作バー(チェック中シーンがあるときだけ表示) */}
@@ -2253,31 +2358,202 @@ export default function StoryboardPage() {
               })()}
             </div>
 
-            {/* 統計情報 */}
+            {/* 動画サマリー */}
             <div>
-              <Card className="bg-card border-border p-6 sticky top-8">
-                <h3 className="text-xl font-semibold text-foreground mb-4">統計情報</h3>
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-sm text-muted-foreground">総シーン数</p>
-                    <p className="text-2xl font-bold text-primary">{scenes.length}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">総セリフ数</p>
-                    <p className="text-2xl font-bold text-accent">
-                      {scenes.reduce((sum, s) => sum + (s.dialogues?.length || 0), 0)}
+              {(() => {
+                const currentVideo = videos.find((v) => v.id === selectedVideoId) ?? null
+                const videoScenes = scenes.filter(
+                  (s) => (s.video_id ?? null) === selectedVideoId,
+                )
+                const totalDialogues = videoScenes.reduce(
+                  (sum, s) => sum + s.dialogues.length,
+                  0,
+                )
+                const totalSec = videoScenes.reduce(
+                  (sum, s) => sum + buildTimelineClips(s).reduce((a, c) => a + c.durationSec, 0),
+                  0,
+                )
+                // キャラ別出番: 発話者(speaker)+キャスト出演
+                const charStats = new Map<
+                  string,
+                  { name: string; imageUrl: string | null; lines: number; seconds: number }
+                >()
+                for (const s of videoScenes) {
+                  const clips = buildTimelineClips(s)
+                  for (let i = 0; i < s.dialogues.length; i++) {
+                    const sd = s.dialogues[i]
+                    const d = sd.dialogue
+                    if (!d) continue
+                    const charId = d.character_id
+                    if (!charId) continue
+                    const char = characters.find((c) => c.id === charId)
+                    if (!char) continue
+                    const stat = charStats.get(charId) ?? {
+                      name: char.name,
+                      imageUrl: char.image_url,
+                      lines: 0,
+                      seconds: 0,
+                    }
+                    stat.lines++
+                    stat.seconds += clips[i]?.durationSec ?? 0
+                    charStats.set(charId, stat)
+                  }
+                }
+                const sortedChars = Array.from(charStats.entries())
+                  .map(([id, v]) => ({ id, ...v }))
+                  .sort((a, b) => b.lines - a.lines)
+                // BGM 使用
+                const bgmUsage = new Map<string, number>()
+                for (const s of videoScenes) {
+                  if (s.bgm_track_id) {
+                    bgmUsage.set(s.bgm_track_id, (bgmUsage.get(s.bgm_track_id) ?? 0) + 1)
+                  }
+                }
+                // 背景使用
+                const bgUsage = new Map<string, number>()
+                for (const s of videoScenes) {
+                  if (s.background_illustration_id) {
+                    bgUsage.set(
+                      s.background_illustration_id,
+                      (bgUsage.get(s.background_illustration_id) ?? 0) + 1,
+                    )
+                  }
+                }
+                // 警告
+                const warnings: string[] = []
+                let missingAudio = 0
+                for (const s of videoScenes) {
+                  for (const sd of s.dialogues) {
+                    const d = sd.dialogue
+                    if (!d) continue
+                    if (d.character_id && !d.audio_id) missingAudio++
+                  }
+                }
+                if (missingAudio > 0) warnings.push(`音声未設定のセリフ: ${missingAudio}件`)
+                const emptyScenes = videoScenes.filter((s) => s.dialogues.length === 0).length
+                if (emptyScenes > 0) warnings.push(`セリフなしのシーン: ${emptyScenes}件`)
+
+                return (
+                  <Card className="bg-card border-border p-6 sticky top-8 max-h-[calc(100vh-4rem)] overflow-auto">
+                    <h3 className="text-xl font-semibold text-foreground mb-1">
+                      {currentVideo?.name ?? '動画サマリー'}
+                    </h3>
+                    <p className="text-xs text-muted-foreground mb-4">
+                      この動画の内容を集計して表示
                     </p>
-                  </div>
-                  {selectedSceneId && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">選択中のシーン</p>
-                      <p className="text-sm font-medium text-foreground">
-                        {scenes.find((s) => s.id === selectedSceneId)?.title}
-                      </p>
+                    <div className="grid grid-cols-3 gap-2 mb-4">
+                      <div className="p-2 bg-background rounded">
+                        <p className="text-[10px] text-muted-foreground">シーン</p>
+                        <p className="text-lg font-bold text-primary tabular-nums">
+                          {videoScenes.length}
+                        </p>
+                      </div>
+                      <div className="p-2 bg-background rounded">
+                        <p className="text-[10px] text-muted-foreground">セリフ</p>
+                        <p className="text-lg font-bold text-accent tabular-nums">
+                          {totalDialogues}
+                        </p>
+                      </div>
+                      <div className="p-2 bg-background rounded">
+                        <p className="text-[10px] text-muted-foreground">総尺</p>
+                        <p className="text-lg font-bold text-primary tabular-nums">
+                          {totalSec.toFixed(1)}s
+                        </p>
+                      </div>
                     </div>
-                  )}
-                </div>
-              </Card>
+
+                    {sortedChars.length > 0 && (
+                      <div className="mb-4">
+                        <p className="text-xs font-medium text-muted-foreground mb-2">
+                          キャラ別出番
+                        </p>
+                        <div className="space-y-1.5">
+                          {sortedChars.map((c) => (
+                            <div
+                              key={c.id}
+                              className="flex items-center gap-2 p-1.5 bg-background rounded"
+                            >
+                              {c.imageUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={c.imageUrl}
+                                  alt=""
+                                  className="w-8 h-8 rounded object-cover flex-shrink-0"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded bg-muted flex-shrink-0" />
+                              )}
+                              <p className="text-xs text-foreground truncate flex-1 min-w-0">
+                                {c.name}
+                              </p>
+                              <p className="text-[10px] text-muted-foreground tabular-nums flex-shrink-0">
+                                {c.lines}台詞・{c.seconds.toFixed(1)}s
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {bgmUsage.size > 0 && (
+                      <div className="mb-4">
+                        <p className="text-xs font-medium text-muted-foreground mb-2">使用BGM</p>
+                        <div className="flex flex-wrap gap-1">
+                          {Array.from(bgmUsage.entries()).map(([id, count]) => {
+                            const t = bgmTracks.find((x) => x.id === id)
+                            if (!t) return null
+                            return (
+                              <span
+                                key={id}
+                                className="text-[10px] px-1.5 py-0.5 bg-primary/10 text-primary rounded"
+                              >
+                                {t.name} ×{count}
+                              </span>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {bgUsage.size > 0 && (
+                      <div className="mb-4">
+                        <p className="text-xs font-medium text-muted-foreground mb-2">使用背景</p>
+                        <div className="flex flex-wrap gap-1">
+                          {Array.from(bgUsage.entries()).map(([id, count]) => {
+                            const i = illustrations.find((x) => x.id === id)
+                            if (!i) return null
+                            return (
+                              <span
+                                key={id}
+                                className="text-[10px] px-1.5 py-0.5 bg-accent/10 text-accent rounded"
+                              >
+                                {i.name} ×{count}
+                              </span>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {warnings.length > 0 && (
+                      <div className="pt-3 border-t border-border">
+                        <p className="text-xs font-medium text-muted-foreground mb-2">チェック</p>
+                        <ul className="space-y-1">
+                          {warnings.map((w, i) => (
+                            <li
+                              key={i}
+                              className="text-[11px] text-destructive flex items-start gap-1"
+                            >
+                              <span>⚠️</span>
+                              <span>{w}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </Card>
+                )
+              })()}
             </div>
           </div>
         </div>
