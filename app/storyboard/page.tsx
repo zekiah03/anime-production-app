@@ -10,7 +10,8 @@ import { SceneExportDialog } from '@/components/scene-export-dialog'
 import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
 import { SceneTimelineBar, type TimelineClip } from '@/components/scene-timeline'
 import { VideoExportDialog } from '@/components/video-export-dialog'
-import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, SceneCastMember, Video, CastPreset } from '@/types/db'
+import { SceneThumbnail } from '@/components/scene-thumbnail'
+import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
   deleteCastPreset,
@@ -349,6 +350,69 @@ export default function StoryboardPage() {
           : s,
       ),
     )
+  }
+
+  // シーンを別動画にコピー(元シーンはそのまま、コピーを対象動画の末尾に追加)
+  async function handleCopySceneToVideo(sceneId: string, targetVideoId: string) {
+    const source = scenes.find((s) => s.id === sceneId)
+    if (!source) return
+    const now = new Date().toISOString()
+    const targetScenes = scenes
+      .filter((s) => (s.video_id ?? null) === targetVideoId)
+      .sort((a, b) => a.order_index - b.order_index)
+    const maxOrder =
+      targetScenes.length > 0 ? targetScenes[targetScenes.length - 1].order_index : -1
+    const newSceneId = crypto.randomUUID()
+    const newScene: Scene = {
+      id: newSceneId,
+      title: (source.title ?? '') + ' (コピー)',
+      description: source.description,
+      background_illustration_id: source.background_illustration_id,
+      bgm_track_id: source.bgm_track_id,
+      bgm_volume: source.bgm_volume,
+      video_id: targetVideoId,
+      order_index: maxOrder + 1,
+      created_at: now,
+      updated_at: now,
+    }
+    await saveScene(newScene)
+
+    const sourceCast = cast.filter((c) => c.scene_id === sceneId)
+    const newCastMembers: SceneCastMember[] = sourceCast.map((c) => ({
+      ...c,
+      id: crypto.randomUUID(),
+      scene_id: newSceneId,
+      created_at: now,
+    }))
+    await Promise.all(newCastMembers.map((c) => saveSceneCastMember(c)))
+
+    const newSds = source.dialogues.map((sd) => ({
+      id: crypto.randomUUID(),
+      scene_id: newSceneId,
+      dialogue_id: sd.dialogue_id,
+      order_index: sd.order_index,
+      se_id: sd.se_id ?? null,
+      se_volume: typeof sd.se_volume === 'number' ? sd.se_volume : 1,
+      character_x: typeof sd.character_x === 'number' ? sd.character_x : 0.5,
+      character_scale:
+        typeof sd.character_scale === 'number' ? sd.character_scale : 1.0,
+      character_flipped: sd.character_flipped ?? false,
+      pause_after_ms: typeof sd.pause_after_ms === 'number' ? sd.pause_after_ms : 0,
+      telop_intro: sd.telop_intro ?? null,
+      telop_shake: sd.telop_shake ?? null,
+      created_at: now,
+      dialogue: sd.dialogue,
+    }))
+    await Promise.all(
+      newSds.map((sd) => {
+        const { dialogue: _d, ...row } = sd
+        void _d
+        return saveSceneDialogue(row)
+      }),
+    )
+
+    setScenes((prev) => [...prev, { ...newScene, dialogues: newSds }])
+    setCast((prev) => [...prev, ...newCastMembers])
   }
 
   // ある動画にシーンを移す(シーン編集フォームから使う)
@@ -700,7 +764,7 @@ export default function StoryboardPage() {
     setDialogueToAdd('')
   }
 
-  // SceneDialogue の SE / キャラ位置 / 反転 / 間合い を更新
+  // SceneDialogue の SE / キャラ位置 / 反転 / 間合い / テロップ上書き を更新
   function updateSceneDialogueMeta(
     sceneId: string,
     sdId: string,
@@ -713,6 +777,8 @@ export default function StoryboardPage() {
         | 'character_scale'
         | 'character_flipped'
         | 'pause_after_ms'
+        | 'telop_intro'
+        | 'telop_shake'
       >
     >,
   ) {
@@ -740,6 +806,8 @@ export default function StoryboardPage() {
               character_flipped: rowPart.character_flipped ?? false,
               pause_after_ms:
                 typeof rowPart.pause_after_ms === 'number' ? rowPart.pause_after_ms : 0,
+              telop_intro: rowPart.telop_intro ?? null,
+              telop_shake: rowPart.telop_shake ?? null,
               created_at: rowPart.created_at,
             }
             saveSceneDialogue(row).catch((e) =>
@@ -1146,6 +1214,15 @@ export default function StoryboardPage() {
                     >
                       <div className="flex items-start gap-4">
                         <GripVertical size={20} className="text-muted-foreground mt-1 flex-shrink-0" />
+                        <SceneThumbnail
+                          scene={scene}
+                          characters={characters}
+                          audioFiles={audioFiles}
+                          expressions={expressions}
+                          illustrations={illustrations}
+                          sceneCast={cast}
+                          className="w-24 h-14 flex-shrink-0 hidden sm:block"
+                        />
                         <div className="flex-1 min-w-0">
                           {/* クリックで展開/縮小するのはヘッダー部分だけ。展開内容は通常のdivなのでクリックが誤って反映されない */}
                           <button
@@ -1192,8 +1269,53 @@ export default function StoryboardPage() {
                               className="mt-4 pt-4 border-t border-border space-y-4"
                               onClick={(e) => e.stopPropagation()}
                             >
-                              {/* 縮めるボタン(展開中の編集UIがクリックで誤って閉じないように、明示ボタンで閉じる) */}
-                              <div className="flex justify-end">
+                              {/* 縮めるボタン + 別動画への移動/コピー */}
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  {videos.filter((v) => v.id !== (scene.video_id ?? null)).length >
+                                    0 && (
+                                    <>
+                                      <select
+                                        value=""
+                                        onChange={(e) => {
+                                          if (e.target.value)
+                                            handleMoveSceneToVideo(scene.id, e.target.value)
+                                          e.target.value = ''
+                                        }}
+                                        className="px-2 py-1 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                        title="このシーンを別動画に移動"
+                                      >
+                                        <option value="">別動画へ移動…</option>
+                                        {videos
+                                          .filter((v) => v.id !== (scene.video_id ?? null))
+                                          .map((v) => (
+                                            <option key={v.id} value={v.id}>
+                                              {v.name}
+                                            </option>
+                                          ))}
+                                      </select>
+                                      <select
+                                        value=""
+                                        onChange={(e) => {
+                                          if (e.target.value)
+                                            handleCopySceneToVideo(scene.id, e.target.value)
+                                          e.target.value = ''
+                                        }}
+                                        className="px-2 py-1 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                        title="このシーンを別動画にコピー"
+                                      >
+                                        <option value="">別動画へコピー…</option>
+                                        {videos
+                                          .filter((v) => v.id !== (scene.video_id ?? null))
+                                          .map((v) => (
+                                            <option key={v.id} value={v.id}>
+                                              {v.name}
+                                            </option>
+                                          ))}
+                                      </select>
+                                    </>
+                                  )}
+                                </div>
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -1615,6 +1737,49 @@ export default function StoryboardPage() {
                                             {((sd.pause_after_ms ?? 0) / 1000).toFixed(1)}秒
                                           </span>
                                         </div>
+                                        {/* 個別字幕スタイル上書き(このセリフだけ演出を変える) */}
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-xs text-muted-foreground flex-shrink-0">
+                                            字幕
+                                          </span>
+                                          <select
+                                            value={sd.telop_intro ?? ''}
+                                            onChange={(e) =>
+                                              updateSceneDialogueMeta(scene.id, sd.id, {
+                                                telop_intro:
+                                                  (e.target.value as TelopIntro) || null,
+                                              })
+                                            }
+                                            className="px-2 py-0.5 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                            title="登場アニメ(空欄=全体設定を使う)"
+                                          >
+                                            <option value="">(全体)</option>
+                                            <option value="none">なし</option>
+                                            <option value="pop">ポップ</option>
+                                            <option value="typewriter">タイプ</option>
+                                            <option value="fade">フェード</option>
+                                          </select>
+                                          <span className="text-muted-foreground text-xs">|</span>
+                                          <span className="text-xs text-muted-foreground flex-shrink-0">
+                                            振動
+                                          </span>
+                                          <select
+                                            value={sd.telop_shake ?? ''}
+                                            onChange={(e) =>
+                                              updateSceneDialogueMeta(scene.id, sd.id, {
+                                                telop_shake:
+                                                  (e.target.value as TelopShake) || null,
+                                              })
+                                            }
+                                            className="px-2 py-0.5 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                            title="振動(空欄=全体設定を使う)"
+                                          >
+                                            <option value="">(全体)</option>
+                                            <option value="none">なし</option>
+                                            <option value="subtle">微</option>
+                                            <option value="heavy">強</option>
+                                          </select>
+                                        </div>
                                       </div>
                                     )
                                   })}
@@ -1924,6 +2089,8 @@ interface SceneDialogueResolved {
   silentDurationMs: number
   // 次のセリフに進む前の間合い(ms)
   pauseAfterMs: number
+  // テロップの個別上書き(null ならグローバル設定)
+  telopStyleForThis: TelopStyle
 }
 
 interface StageExtraResolved {
@@ -2049,6 +2216,11 @@ function ScenePlayerDialog({
         typeof d.duration_ms === 'number' && d.duration_ms > 0 ? d.duration_ms : 3000
       const pauseAfterMs =
         typeof sd.pause_after_ms === 'number' && sd.pause_after_ms > 0 ? sd.pause_after_ms : 0
+      const telopStyleForThis: TelopStyle = {
+        ...telopStyle,
+        intro: sd.telop_intro ?? telopStyle.intro,
+        shake: sd.telop_shake ?? telopStyle.shake,
+      }
       return {
         sdId: sd.id,
         text: d.text,
@@ -2064,6 +2236,7 @@ function ScenePlayerDialog({
         extras,
         silentDurationMs,
         pauseAfterMs,
+        telopStyleForThis,
       } satisfies SceneDialogueResolved
     })
     // 採用ルール: (キャラ+音声) or (テキストあり= ナレーション)
@@ -2159,7 +2332,7 @@ function ScenePlayerDialog({
                 audioUrl={current?.audio?.file_url ?? null}
                 overrideExpressionId={current?.expressionId ?? null}
                 caption={current?.text ?? null}
-                telopStyle={telopStyle}
+                telopStyle={current?.telopStyleForThis ?? telopStyle}
                 backgroundLayers={backgroundLayers}
                 characterX={current?.characterX ?? 0.5}
                 characterScale={current?.characterScale ?? 1.0}

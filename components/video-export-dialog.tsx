@@ -96,6 +96,7 @@ interface ResolvedDialogue {
   extras: ExportExtra[]
   silentDurationMs: number
   pauseAfterMs: number
+  telopStyleForThis: TelopStyle
 }
 
 export function VideoExportDialog({
@@ -221,6 +222,11 @@ export function VideoExportDialog({
             typeof sd.pause_after_ms === 'number' && sd.pause_after_ms > 0
               ? sd.pause_after_ms
               : 0
+          const telopStyleForThis: TelopStyle = {
+            ...effectiveStyle,
+            intro: sd.telop_intro ?? effectiveStyle.intro,
+            shake: sd.telop_shake ?? effectiveStyle.shake,
+          }
           return {
             text: d.text,
             character,
@@ -239,6 +245,7 @@ export function VideoExportDialog({
             extras,
             silentDurationMs,
             pauseAfterMs,
+            telopStyleForThis,
           } as ResolvedDialogue
         })
         .filter((x): x is ResolvedDialogue => x !== null)
@@ -368,7 +375,7 @@ export function VideoExportDialog({
 
     // テロップ
     if (current.text) {
-      const style = effectiveStyle
+      const style = current.telopStyleForThis ?? effectiveStyle
       const visibleText =
         style.intro === 'typewriter'
           ? current.text.slice(

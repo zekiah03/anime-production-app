@@ -140,6 +140,9 @@ export interface SceneDialogue {
   character_flipped?: boolean
   // このセリフを終えてから次に進むまでの追加無音時間 ms(間合い)
   pause_after_ms?: number
+  // グローバルのテロップ設定を個別セリフで上書きしたい場合に使う(null = 継承)
+  telop_intro?: TelopIntro | null
+  telop_shake?: TelopShake | null
   created_at: string
 }
 
