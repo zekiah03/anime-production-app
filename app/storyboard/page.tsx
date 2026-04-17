@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video as VideoIcon, Type, FlipHorizontal, ChevronDown, ChevronUp, Minimize2, Pencil, Folder, FolderPlus, Copy, Clock } from 'lucide-react'
+import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video as VideoIcon, Type, FlipHorizontal, ChevronDown, ChevronUp, Minimize2, Pencil, Folder, FolderPlus, Copy, Clock, Search, X, Check, Maximize2 } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar'
 import { SceneExportDialog } from '@/components/scene-export-dialog'
 import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
@@ -84,6 +84,11 @@ export default function StoryboardPage() {
   const [previewingSdId, setPreviewingSdId] = useState<string | null>(null)
   const [exportingSceneId, setExportingSceneId] = useState<string | null>(null)
   const [exportingVideoId, setExportingVideoId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  // 複数シーンを選択して一括操作するためのセット(selectedSceneId は展開中の1シーン)
+  const [checkedSceneIds, setCheckedSceneIds] = useState<Set<string>>(new Set())
+  // 全シーン展開モード(全部の展開パネルを開く)
+  const [allExpanded, setAllExpanded] = useState(false)
   const [telopStyle, setTelopStyle] = useState<TelopStyle>(DEFAULT_TELOP_STYLE)
   const [showTelopSettings, setShowTelopSettings] = useState(false)
   // ナレーション追加フォーム(展開中のシーンに対して使う)
@@ -602,6 +607,50 @@ export default function StoryboardPage() {
     if (!window.confirm(`プリセット「${p.name}」を削除しますか?`)) return
     await deleteCastPreset(presetId)
     setCastPresets((prev) => prev.filter((x) => x.id !== presetId))
+  }
+
+  // ==================== 複数シーン一括操作 ====================
+
+  function toggleChecked(sceneId: string) {
+    setCheckedSceneIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(sceneId)) next.delete(sceneId)
+      else next.add(sceneId)
+      return next
+    })
+  }
+
+  function clearChecked() {
+    setCheckedSceneIds(new Set())
+  }
+
+  async function handleBulkDelete() {
+    const ids = Array.from(checkedSceneIds)
+    if (ids.length === 0) return
+    if (!window.confirm(`選択中の ${ids.length} シーンを削除しますか?`)) return
+    for (const id of ids) await deleteScene(id)
+    setScenes((prev) => prev.filter((s) => !checkedSceneIds.has(s.id)))
+    setCast((prev) => prev.filter((c) => !checkedSceneIds.has(c.scene_id)))
+    if (selectedSceneId && checkedSceneIds.has(selectedSceneId)) setSelectedSceneId(null)
+    clearChecked()
+  }
+
+  async function handleBulkMove(targetVideoId: string) {
+    const ids = Array.from(checkedSceneIds)
+    if (ids.length === 0) return
+    for (const id of ids) {
+      await handleMoveSceneToVideo(id, targetVideoId)
+    }
+    clearChecked()
+  }
+
+  async function handleBulkCopy(targetVideoId: string) {
+    const ids = Array.from(checkedSceneIds)
+    if (ids.length === 0) return
+    for (const id of ids) {
+      await handleCopySceneToVideo(id, targetVideoId)
+    }
+    clearChecked()
   }
 
   // ナレーション(character_id=null の Dialogue)を新規作成してシーンに追加する
@@ -1175,24 +1224,158 @@ export default function StoryboardPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* シーン一覧 */}
             <div className="lg:col-span-2">
-              <h3 className="text-xl font-semibold text-foreground mb-4">シーン</h3>
+              <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
+                <h3 className="text-xl font-semibold text-foreground">シーン</h3>
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setAllExpanded(true)}
+                    className="gap-1 h-7 px-2 text-xs"
+                    title="この動画の全シーンを展開"
+                  >
+                    <Maximize2 size={12} />
+                    全展開
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setAllExpanded(false)
+                      setSelectedSceneId(null)
+                    }}
+                    className="gap-1 h-7 px-2 text-xs"
+                    title="全シーンを縮める"
+                  >
+                    <Minimize2 size={12} />
+                    全縮小
+                  </Button>
+                </div>
+              </div>
+
+              {/* セリフ/タイトル検索 */}
+              <div className="flex items-center gap-2 mb-3">
+                <div className="flex-1 relative">
+                  <Search
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <input
+                    type="text"
+                    placeholder="セリフ・シーンタイトルを検索"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-9 py-2 bg-background border border-input rounded-md text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-primary/20 rounded transition"
+                      title="クリア"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 一括操作バー(チェック中シーンがあるときだけ表示) */}
+              {checkedSceneIds.size > 0 && (
+                <Card className="bg-primary/10 border-primary/40 p-3 mb-3 flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <Check size={14} className="text-primary" />
+                    <span className="text-sm text-foreground">
+                      {checkedSceneIds.size} シーン選択中
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {videos.length > 0 && (
+                      <>
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value) handleBulkMove(e.target.value)
+                            e.target.value = ''
+                          }}
+                          className="px-2 py-1 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">別動画へ移動…</option>
+                          {videos
+                            .filter((v) => v.id !== selectedVideoId)
+                            .map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {v.name}
+                              </option>
+                            ))}
+                        </select>
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value) handleBulkCopy(e.target.value)
+                            e.target.value = ''
+                          }}
+                          className="px-2 py-1 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">別動画へコピー…</option>
+                          {videos
+                            .filter((v) => v.id !== selectedVideoId)
+                            .map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {v.name}
+                              </option>
+                            ))}
+                        </select>
+                      </>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleBulkDelete}
+                      className="gap-1 h-8 px-2 text-xs text-destructive border-destructive/40 hover:bg-destructive/20"
+                    >
+                      <Trash2 size={12} />
+                      削除
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={clearChecked}
+                      className="h-8 px-2 text-xs"
+                    >
+                      選択解除
+                    </Button>
+                  </div>
+                </Card>
+              )}
+
               {loading ? (
                 <div className="text-center py-12">
                   <p className="text-muted-foreground">読み込み中...</p>
                 </div>
               ) : (() => {
+                const q = searchQuery.trim().toLowerCase()
                 const filteredScenes = scenes
                   .filter((s) => (s.video_id ?? null) === selectedVideoId)
+                  .filter((s) => {
+                    if (!q) return true
+                    if ((s.title ?? '').toLowerCase().includes(q)) return true
+                    if ((s.description ?? '').toLowerCase().includes(q)) return true
+                    return s.dialogues.some((sd) =>
+                      (sd.dialogue?.text ?? '').toLowerCase().includes(q),
+                    )
+                  })
                   .sort((a, b) => a.order_index - b.order_index)
                 if (filteredScenes.length === 0) {
                   return (
                     <Card className="bg-card border-border p-12 text-center">
                       <Film size={48} className="mx-auto text-muted-foreground mb-4" />
                       <h3 className="text-xl font-semibold text-foreground mb-2">
-                        この動画にはまだシーンがありません
+                        {q ? '該当するシーンがありません' : 'この動画にはまだシーンがありません'}
                       </h3>
                       <p className="text-muted-foreground">
-                        「新規シーン」ボタンで最初のシーンを作成してください
+                        {q
+                          ? '検索条件を変更するか、クリアしてください'
+                          : '「新規シーン」ボタンで最初のシーンを作成してください'}
                       </p>
                     </Card>
                   )
@@ -1213,6 +1396,18 @@ export default function StoryboardPage() {
                       className="bg-card border-border p-4 hover:border-primary/50 transition cursor-move"
                     >
                       <div className="flex items-start gap-4">
+                        <label
+                          className="flex items-center h-7 cursor-pointer flex-shrink-0"
+                          onClick={(e) => e.stopPropagation()}
+                          title="一括操作用の選択"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checkedSceneIds.has(scene.id)}
+                            onChange={() => toggleChecked(scene.id)}
+                            className="w-4 h-4 accent-primary"
+                          />
+                        </label>
                         <GripVertical size={20} className="text-muted-foreground mt-1 flex-shrink-0" />
                         <SceneThumbnail
                           scene={scene}
@@ -1264,7 +1459,7 @@ export default function StoryboardPage() {
                             </p>
                           </button>
 
-                          {selectedSceneId === scene.id && (
+                          {(selectedSceneId === scene.id || allExpanded) && (
                             <div
                               className="mt-4 pt-4 border-t border-border space-y-4"
                               onClick={(e) => e.stopPropagation()}
@@ -1549,10 +1744,18 @@ export default function StoryboardPage() {
                                           ? 'bg-primary/20 border-primary/40 text-primary'
                                           : 'bg-card border-input text-muted-foreground hover:bg-primary/10'
                                       }`
+                                    const q = searchQuery.trim().toLowerCase()
+                                    const matchedBySearch =
+                                      q.length > 0 &&
+                                      (sd.dialogue?.text ?? '').toLowerCase().includes(q)
                                     return (
                                       <div
                                         key={sd.id}
-                                        className="p-2 bg-background rounded text-sm space-y-2"
+                                        className={`p-2 rounded text-sm space-y-2 ${
+                                          matchedBySearch
+                                            ? 'bg-primary/15 border border-primary/30'
+                                            : 'bg-background'
+                                        }`}
                                         onClick={(e) => e.stopPropagation()}
                                       >
                                         <div className="flex items-start justify-between gap-2">
