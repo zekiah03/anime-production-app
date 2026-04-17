@@ -13,6 +13,8 @@ import { VideoExportDialog } from '@/components/video-export-dialog'
 import { SceneThumbnail, renderSceneFrame } from '@/components/scene-thumbnail'
 import { useToast } from '@/components/toast'
 import { useSaveStatus, SaveStatusBadge } from '@/components/save-status'
+import { StorageBadge } from '@/components/storage-badge'
+import { StoryboardEmptyState } from '@/components/empty-state'
 import { charColorHsl } from '@/lib/char-color'
 import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
@@ -2085,6 +2087,7 @@ export default function StoryboardPage() {
               <div className="flex items-center gap-3 flex-wrap">
                 <h2 className="text-3xl font-bold text-foreground">ストーリーボード</h2>
                 <SaveStatusBadge state={save.state} lastSavedAt={save.lastSavedAt} />
+                <StorageBadge />
               </div>
               <p className="text-muted-foreground mt-1">シーンを構築してストーリーを作成</p>
             </div>
@@ -2752,6 +2755,23 @@ export default function StoryboardPage() {
                   })
                   .sort((a, b) => a.order_index - b.order_index)
                 if (filteredScenes.length === 0) {
+                  // プロジェクト全体で 1 シーンも無い かつ 検索もしていない = 初回起動状態。
+                  // 3 ステップの大きなガイドを出す。
+                  const isFreshProject = !q && scenes.length === 0
+                  if (isFreshProject) {
+                    return (
+                      <StoryboardEmptyState
+                        progress={{
+                          hasCharacters: characters.length > 0,
+                          hasAssets:
+                            illustrations.length > 0 ||
+                            bgmTracks.length > 0 ||
+                            sounds.length > 0,
+                          hasScenes: scenes.length > 0,
+                        }}
+                      />
+                    )
+                  }
                   return (
                     <Card className="bg-card border-border p-12 text-center">
                       <Film size={48} className="mx-auto text-muted-foreground mb-4" />

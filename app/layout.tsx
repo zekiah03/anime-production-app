@@ -9,9 +9,19 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'アニメ制作支援ツール',
-  description: 'アニメ制作のための音声、キャラクター、セリフ、ストーリーボード管理ツール',
-  generator: 'v0.app',
+  title: {
+    default: 'アニメ制作支援ツール',
+    template: '%s - アニメ制作支援ツール',
+  },
+  description: 'ブラウザで完結するアニメ制作ワークフロー。キャラ・音声・シーン・BGM・SE を統合管理し、動画まで書き出せます。',
+  applicationName: 'AnimeStudio',
+  manifest: '/manifest.webmanifest',
+  themeColor: '#0b0b0b',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'AnimeStudio',
+  },
   icons: {
     icon: [
       {
