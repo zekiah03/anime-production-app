@@ -358,7 +358,9 @@ export function LipSyncStage({
               style={toBandStyle(effectiveStyle)}
             >
               <span className={shakeClass || undefined}>
-                <span style={toTextStyle(effectiveStyle)}>{revealedText}</span>
+                <span style={{ ...toTextStyle(effectiveStyle), whiteSpace: 'pre-wrap' }}>
+                  {revealedText}
+                </span>
               </span>
             </span>
           </div>

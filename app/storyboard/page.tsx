@@ -4444,7 +4444,7 @@ export default function StoryboardPage() {
                                   </span>
                                   <span className="truncate">{r.sceneTitle}</span>
                                 </div>
-                                <div className="text-sm text-foreground mt-1 break-words">
+                                <div className="text-sm text-foreground mt-1 break-words whitespace-pre-wrap">
                                   {r.text}
                                 </div>
                               </button>
@@ -4768,6 +4768,7 @@ function ScenePlayerDialog({
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [playbackRate, setPlaybackRate] = useState(1)
+  const [bgmMuted, setBgmMuted] = useState(false)
   const bgmRef = useRef<HTMLAudioElement | null>(null)
   const seRef = useRef<HTMLAudioElement | null>(null)
   const pauseTimerRef = useRef<number | null>(null)
@@ -4779,11 +4780,11 @@ function ScenePlayerDialog({
     setPlaying(!!autoPlay && !!scene)
   }, [scene?.id, autoPlay])
 
-  // BGM: playing=true の間だけループ再生
+  // BGM: playing=true の間だけループ再生(ミュート時は音量 0)
   useEffect(() => {
     const el = bgmRef.current
     if (!el) return
-    el.volume = bgmVolume
+    el.volume = bgmMuted ? 0 : bgmVolume
     el.playbackRate = playbackRate
     if (playing && bgmTrack) {
       el.currentTime = 0
@@ -4791,7 +4792,7 @@ function ScenePlayerDialog({
     } else {
       el.pause()
     }
-  }, [playing, bgmTrack?.id, bgmVolume, playbackRate])
+  }, [playing, bgmTrack?.id, bgmVolume, playbackRate, bgmMuted])
 
   // SE: 現在のセリフが切り替わるたびに冒頭で oneshot 再生
   useEffect(() => {
@@ -5031,6 +5032,20 @@ function ScenePlayerDialog({
               <Button size="sm" variant="outline" onClick={handleSkip} disabled={!playing} className="gap-1">
                 <SkipForward size={14} /> 次へ
               </Button>
+              {bgmTrack && (
+                <button
+                  type="button"
+                  onClick={() => setBgmMuted((v) => !v)}
+                  className={`ml-2 px-2 py-1 text-xs rounded border transition ${
+                    bgmMuted
+                      ? 'bg-destructive/20 border-destructive/40 text-destructive'
+                      : 'bg-background border-input text-muted-foreground hover:bg-primary/10'
+                  }`}
+                  title={bgmMuted ? 'BGM ミュート中(クリックで解除)' : 'BGM をミュート'}
+                >
+                  {bgmMuted ? 'BGM🔇' : 'BGM🔊'}
+                </button>
+              )}
               <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
                 <span>速度</span>
                 {[0.5, 1, 1.5, 2].map((r) => (

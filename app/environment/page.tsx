@@ -65,8 +65,17 @@ export default function EnvironmentPage() {
   const illustImageInputRef = useRef<HTMLInputElement | null>(null)
   // D&D 用: いまどのタブの上にファイルがドラッグされているか
   const [dragOverTab, setDragOverTab] = useState<'images' | 'bgm' | 'se' | null>(null)
+  // 検索クエリ(タブ別)
+  const [imgSearch, setImgSearch] = useState('')
+  const [bgmSearch, setBgmSearch] = useState('')
+  const [seSearch, setSeSearch] = useState('')
 
   const selected = illustrations.find((i) => i.id === selectedId) ?? null
+  const matches = (name: string, q: string) =>
+    q.trim().length === 0 || name.toLowerCase().includes(q.trim().toLowerCase())
+  const filteredIllustrations = illustrations.filter((i) => matches(i.name, imgSearch))
+  const filteredBgm = bgmTracks.filter((b) => matches(b.name, bgmSearch))
+  const filteredSe = sounds.filter((s) => matches(s.name, seSearch))
 
   useEffect(() => {
     getAllIllustrations()
@@ -615,7 +624,7 @@ export default function EnvironmentPage() {
             <div>
               <Card className="bg-card border-border p-6">
                 <h3 className="text-lg font-semibold text-foreground mb-4">素材一覧</h3>
-                <form onSubmit={handleCreateIllustration} className="flex gap-2 mb-4">
+                <form onSubmit={handleCreateIllustration} className="flex gap-2 mb-2">
                   <Input
                     type="text"
                     placeholder="新規素材名(例: 教室背景)"
@@ -627,18 +636,25 @@ export default function EnvironmentPage() {
                     <Plus size={16} />
                   </Button>
                 </form>
+                <Input
+                  type="text"
+                  placeholder="名前で検索..."
+                  value={imgSearch}
+                  onChange={(e) => setImgSearch(e.target.value)}
+                  className="bg-background border-input mb-4 h-8 text-xs"
+                />
 
                 {loading ? (
                   <div className="text-center py-8 text-sm text-muted-foreground">
                     読み込み中...
                   </div>
-                ) : illustrations.length === 0 ? (
+                ) : filteredIllustrations.length === 0 ? (
                   <div className="text-center py-8 text-sm text-muted-foreground">
-                    素材がまだありません
+                    {imgSearch ? '該当する素材がありません' : '素材がまだありません'}
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {illustrations.map((illust) => (
+                    {filteredIllustrations.map((illust) => (
                       <div
                         key={illust.id}
                         onClick={() => setSelectedId(illust.id)}
@@ -901,18 +917,28 @@ export default function EnvironmentPage() {
                   </div>
                 </div>
 
+                <Input
+                  type="text"
+                  placeholder="BGMを名前で検索..."
+                  value={bgmSearch}
+                  onChange={(e) => setBgmSearch(e.target.value)}
+                  className="bg-background border-input mb-3 h-8 text-xs"
+                />
+
                 {bgmLoading ? (
                   <div className="text-center py-8 text-sm text-muted-foreground">
                     読み込み中...
                   </div>
-                ) : bgmTracks.length === 0 ? (
+                ) : filteredBgm.length === 0 ? (
                   <div className="text-center py-10 text-sm text-muted-foreground">
                     <Music size={32} className="mx-auto mb-2 opacity-50" />
-                    BGMがまだありません。「BGM追加」からアップロードしてください
+                    {bgmSearch
+                      ? '該当するBGMがありません'
+                      : 'BGMがまだありません。「BGM追加」からアップロードしてください'}
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {bgmTracks.map((track) => (
+                    {filteredBgm.map((track) => (
                       <div
                         key={track.id}
                         className="flex items-center gap-3 p-3 bg-background rounded-lg border border-border"
@@ -997,18 +1023,28 @@ export default function EnvironmentPage() {
                   </div>
                 </div>
 
+                <Input
+                  type="text"
+                  placeholder="SEを名前で検索..."
+                  value={seSearch}
+                  onChange={(e) => setSeSearch(e.target.value)}
+                  className="bg-background border-input mb-3 h-8 text-xs"
+                />
+
                 {seLoading ? (
                   <div className="text-center py-8 text-sm text-muted-foreground">
                     読み込み中...
                   </div>
-                ) : sounds.length === 0 ? (
+                ) : filteredSe.length === 0 ? (
                   <div className="text-center py-10 text-sm text-muted-foreground">
                     <Zap size={32} className="mx-auto mb-2 opacity-50" />
-                    効果音がまだありません。「SE追加」からアップロードしてください
+                    {seSearch
+                      ? '該当する効果音がありません'
+                      : '効果音がまだありません。「SE追加」からアップロードしてください'}
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {sounds.map((se) => (
+                    {filteredSe.map((se) => (
                       <div
                         key={se.id}
                         className="flex items-center gap-3 p-3 bg-background rounded-lg border border-border"
