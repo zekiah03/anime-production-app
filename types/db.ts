@@ -4,9 +4,23 @@ export interface Character {
   id: string
   name: string
   description: string | null
-  image_url: string | null
+  image_url: string | null // blob URL (derived from image_blob at runtime)
+  image_blob?: Blob // メイン画像(口閉じ/通常)
   created_at: string
   updated_at: string
+}
+
+// キャラ表情(口パク用の口開閉・表情バリエーション)
+export type ExpressionKind = 'mouth_closed' | 'mouth_open' | 'expression'
+
+export interface CharacterExpression {
+  id: string
+  character_id: string
+  name: string
+  kind: ExpressionKind
+  image_url: string // blob URL (derived)
+  image_blob?: Blob
+  created_at: string
 }
 
 export interface AudioFile {

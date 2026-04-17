@@ -5,6 +5,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type {
   Character,
+  CharacterExpression,
   AudioFile,
   Dialogue,
   Scene,
@@ -14,14 +15,21 @@ import type {
 } from '@/types/db'
 
 const DB_NAME = 'anime-production'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 // 永続化形式 (file_url / image_url は実行時に Blob から生成するので保存しない)
+type StoredCharacter = Omit<Character, 'image_url'> & { image_blob?: Blob }
 type StoredAudioFile = Omit<AudioFile, 'file_url'> & { file_blob: Blob }
 type StoredLayer = Omit<Layer, 'image_url'> & { image_blob: Blob }
+type StoredExpression = Omit<CharacterExpression, 'image_url'> & { image_blob: Blob }
 
 interface AnimeDB extends DBSchema {
-  characters: { key: string; value: Character }
+  characters: { key: string; value: StoredCharacter }
+  character_expressions: {
+    key: string
+    value: StoredExpression
+    indexes: { by_character: string }
+  }
   audio_files: {
     key: string
     value: StoredAudioFile
@@ -81,6 +89,10 @@ function getDB() {
           const store = db.createObjectStore('layers', { keyPath: 'id' })
           store.createIndex('by_illustration', 'illustration_id')
         }
+        if (!db.objectStoreNames.contains('character_expressions')) {
+          const store = db.createObjectStore('character_expressions', { keyPath: 'id' })
+          store.createIndex('by_character', 'character_id')
+        }
       },
     })
   }
@@ -89,21 +101,35 @@ function getDB() {
 
 // ==================== Characters ====================
 
+function hydrateCharacter(stored: StoredCharacter): Character {
+  return {
+    ...stored,
+    image_url: stored.image_blob ? URL.createObjectURL(stored.image_blob) : null,
+  }
+}
+
 export async function getAllCharacters(): Promise<Character[]> {
   const db = await getDB()
   const all = await db.getAll('characters')
-  return all.sort((a, b) => b.created_at.localeCompare(a.created_at))
+  return all
+    .map(hydrateCharacter)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
 }
 
 export async function saveCharacter(character: Character): Promise<void> {
   const db = await getDB()
-  await db.put('characters', character)
+  const { image_url: _image_url, ...rest } = character
+  void _image_url
+  await db.put('characters', rest as StoredCharacter)
 }
 
 export async function deleteCharacter(id: string): Promise<void> {
   const db = await getDB()
-  // 関連する audio_files / dialogues の character_id を null にする
-  const tx = db.transaction(['characters', 'audio_files', 'dialogues'], 'readwrite')
+  // 関連する audio_files / dialogues の character_id を null にする / expressions は削除
+  const tx = db.transaction(
+    ['characters', 'audio_files', 'dialogues', 'character_expressions'],
+    'readwrite',
+  )
   await tx.objectStore('characters').delete(id)
 
   const audioIndex = tx.objectStore('audio_files').index('by_character')
@@ -114,7 +140,43 @@ export async function deleteCharacter(id: string): Promise<void> {
   for await (const cursor of dialogueIndex.iterate(id)) {
     await cursor.update({ ...cursor.value, character_id: null })
   }
+  const exprIndex = tx.objectStore('character_expressions').index('by_character')
+  for await (const cursor of exprIndex.iterate(id)) {
+    await cursor.delete()
+  }
   await tx.done
+}
+
+// ==================== Character Expressions ====================
+
+function hydrateExpression(stored: StoredExpression): CharacterExpression {
+  return {
+    ...stored,
+    image_url: URL.createObjectURL(stored.image_blob),
+  }
+}
+
+export async function getExpressionsByCharacter(
+  characterId: string,
+): Promise<CharacterExpression[]> {
+  const db = await getDB()
+  const all = await db.getAllFromIndex('character_expressions', 'by_character', characterId)
+  return all
+    .map(hydrateExpression)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+}
+
+export async function saveExpression(expr: CharacterExpression): Promise<void> {
+  if (!expr.image_blob) throw new Error('image_blob is required')
+  const db = await getDB()
+  const { image_url: _image_url, ...rest } = expr
+  void _image_url
+  await db.put('character_expressions', { ...rest, image_blob: expr.image_blob })
+}
+
+export async function deleteExpression(id: string): Promise<void> {
+  const db = await getDB()
+  await db.delete('character_expressions', id)
 }
 
 // ==================== Audio ====================
