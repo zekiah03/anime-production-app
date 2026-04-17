@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video, Type, FlipHorizontal } from 'lucide-react'
+import { Film, Plus, Trash2, Edit2, GripVertical, Play, Square, SkipForward, Video, Type, FlipHorizontal, ChevronDown, ChevronUp, Minimize2 } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar'
 import { SceneExportDialog } from '@/components/scene-export-dialog'
 import { TelopSettingsDialog } from '@/components/telop-settings-dialog'
@@ -582,25 +582,47 @@ export default function StoryboardPage() {
                     >
                       <div className="flex items-start gap-4">
                         <GripVertical size={20} className="text-muted-foreground mt-1 flex-shrink-0" />
-                        <div
-                          className="flex-1 min-w-0 cursor-pointer"
-                          onClick={() => setSelectedSceneId(selectedSceneId === scene.id ? null : scene.id)}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-muted-foreground bg-primary/20 px-2 py-1 rounded">
-                              #{index + 1}
-                            </span>
-                            <h4 className="font-semibold text-foreground">{scene.title}</h4>
-                          </div>
-                          {scene.description && (
-                            <p className="text-sm text-muted-foreground mt-1">{scene.description}</p>
-                          )}
-                          <p className="text-xs text-muted-foreground mt-2">
-                            セリフ数: {scene.dialogues?.length || 0}
-                          </p>
+                        <div className="flex-1 min-w-0">
+                          {/* クリックで展開/縮小するのはヘッダー部分だけ。展開内容は通常のdivなのでクリックが誤って反映されない */}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedSceneId(selectedSceneId === scene.id ? null : scene.id)
+                            }
+                            className="w-full text-left cursor-pointer block"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-semibold text-muted-foreground bg-primary/20 px-2 py-1 rounded">
+                                #{index + 1}
+                              </span>
+                              <h4 className="font-semibold text-foreground">{scene.title}</h4>
+                            </div>
+                            {scene.description && (
+                              <p className="text-sm text-muted-foreground mt-1">{scene.description}</p>
+                            )}
+                            <p className="text-xs text-muted-foreground mt-2">
+                              セリフ数: {scene.dialogues?.length || 0}
+                            </p>
+                          </button>
 
                           {selectedSceneId === scene.id && (
-                            <div className="mt-4 pt-4 border-t border-border space-y-4">
+                            <div
+                              className="mt-4 pt-4 border-t border-border space-y-4"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {/* 縮めるボタン(展開中の編集UIがクリックで誤って閉じないように、明示ボタンで閉じる) */}
+                              <div className="flex justify-end">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setSelectedSceneId(null)}
+                                  className="gap-1 h-7 px-2 text-xs"
+                                >
+                                  <Minimize2 size={12} />
+                                  縮める
+                                </Button>
+                              </div>
+
                               {/* ===== 登場キャラ(scene_cast) ===== */}
                               <div className="space-y-2">
                                 <div className="flex items-center justify-between gap-2">
@@ -1019,6 +1041,22 @@ export default function StoryboardPage() {
                           )}
                         </div>
                         <div className="flex gap-2 flex-shrink-0">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelectedSceneId(
+                                selectedSceneId === scene.id ? null : scene.id,
+                              )
+                            }}
+                            className="p-2 hover:bg-primary/20 rounded-lg transition"
+                            title={selectedSceneId === scene.id ? '縮める' : '展開'}
+                          >
+                            {selectedSceneId === scene.id ? (
+                              <ChevronUp size={16} className="text-primary" />
+                            ) : (
+                              <ChevronDown size={16} className="text-primary" />
+                            )}
+                          </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation()
