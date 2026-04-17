@@ -286,7 +286,7 @@ export default function CharactersPage() {
                     </p>
                     <Button size="sm" variant="outline" onClick={() => setDetailId(character.id)} className="gap-1">
                       <Sparkles size={14} />
-                      表情 & リップシンク
+                      表情・音声・セリフ
                     </Button>
                   </div>
                 </Card>
