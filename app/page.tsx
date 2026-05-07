@@ -4,10 +4,11 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Users, Film, Plus, Mountain } from 'lucide-react'
+import { Users, Film, Plus, Mountain, Cloud } from 'lucide-react'
 import type { Character } from '@/types/db'
 import { getAllCharacters, getCounts } from '@/lib/db'
 import { Sidebar } from '@/components/sidebar'
+import { CloudSyncDialog } from '@/components/cloud-sync-dialog'
 
 export default function Dashboard() {
   const [counts, setCounts] = useState({
@@ -18,6 +19,7 @@ export default function Dashboard() {
     illustrations: 0,
   })
   const [recentCharacters, setRecentCharacters] = useState<Character[]>([])
+  const [cloudOpen, setCloudOpen] = useState(false)
 
   useEffect(() => {
     Promise.all([getCounts(), getAllCharacters()])
@@ -34,9 +36,15 @@ export default function Dashboard() {
 
       <main className="flex-1 overflow-auto">
         <div className="p-8">
-          <div className="mb-8">
-            <h2 className="text-3xl font-bold text-foreground mb-2">ダッシュボード</h2>
-            <p className="text-muted-foreground">アニメプロジェクトを管理しましょう</p>
+          <div className="mb-8 flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-3xl font-bold text-foreground mb-2">ダッシュボード</h2>
+              <p className="text-muted-foreground">アニメプロジェクトを管理しましょう</p>
+            </div>
+            <Button onClick={() => setCloudOpen(true)} variant="outline" className="gap-2">
+              <Cloud size={16} />
+              クラウド同期
+            </Button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
@@ -147,6 +155,8 @@ export default function Dashboard() {
           </div>
         </div>
       </main>
+
+      <CloudSyncDialog open={cloudOpen} onClose={() => setCloudOpen(false)} />
     </div>
   )
 }
