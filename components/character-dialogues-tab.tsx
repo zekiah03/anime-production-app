@@ -3,10 +3,11 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Play, Plus, Square, Trash2, Edit2, Music, Sparkles } from 'lucide-react'
+import { Play, Plus, Square, Trash2, Edit2, Music, Sparkles, Wand2 } from 'lucide-react'
 import type { AudioFile, Character, CharacterExpression, CharacterPosition, Dialogue } from '@/types/db'
 import { deleteDialogue, saveDialogue } from '@/lib/db'
 import { LipSyncStage } from '@/components/lip-sync-stage'
+import { AIDialogueGenerator, type GeneratedDialogue } from '@/components/ai-dialogue-generator'
 
 const EMOTIONS = ['通常', '怒り', '悲しみ', '喜び', '驚き', '恐怖']
 
@@ -28,6 +29,7 @@ export function CharacterDialoguesTab({
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [playingId, setPlayingId] = useState<string | null>(null)
+  const [aiOpen, setAiOpen] = useState(false)
   const [formData, setFormData] = useState({
     text: '',
     audio_id: '',
@@ -102,6 +104,35 @@ export function CharacterDialoguesTab({
     onChange(dialogues.filter((d) => d.id !== id))
   }
 
+  async function handleBulkInsert(generated: GeneratedDialogue[]) {
+    const now = new Date().toISOString()
+    const inserted: Dialogue[] = []
+    for (const g of generated) {
+      const d: Dialogue = {
+        id: crypto.randomUUID(),
+        text: g.text,
+        character_id: character.id,
+        audio_id: null,
+        expression_id: null,
+        position: 'center',
+        scale: 1,
+        emotion: g.emotion || null,
+        notes: g.notes || null,
+        created_at: now,
+        updated_at: now,
+      }
+      try {
+        await saveDialogue(d)
+        inserted.push(d)
+      } catch (e) {
+        console.error('[anime-app] bulk insert failed', e)
+      }
+    }
+    if (inserted.length > 0) {
+      onChange([...inserted, ...dialogues])
+    }
+  }
+
   function handleEdit(d: Dialogue) {
     setFormData({
       text: d.text,
@@ -120,17 +151,28 @@ export function CharacterDialoguesTab({
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h4 className="font-semibold text-foreground">{character.name} のセリフ</h4>
-        <Button
-          size="sm"
-          onClick={() => {
-            if (showForm) resetForm()
-            else setShowForm(true)
-          }}
-          className="gap-1"
-        >
-          <Plus size={14} />
-          {showForm ? 'キャンセル' : '新規作成'}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setAiOpen(true)}
+            className="gap-1"
+          >
+            <Wand2 size={14} />
+            AIで生成
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              if (showForm) resetForm()
+              else setShowForm(true)
+            }}
+            className="gap-1"
+          >
+            <Plus size={14} />
+            {showForm ? 'キャンセル' : '新規作成'}
+          </Button>
+        </div>
       </div>
 
       {showForm && (
@@ -327,6 +369,13 @@ export function CharacterDialoguesTab({
           })}
         </div>
       )}
+
+      <AIDialogueGenerator
+        character={character}
+        open={aiOpen}
+        onClose={() => setAiOpen(false)}
+        onAccept={handleBulkInsert}
+      />
     </div>
   )
 }
