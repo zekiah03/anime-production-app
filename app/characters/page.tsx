@@ -38,6 +38,7 @@ import { LipSyncStage } from '@/components/lip-sync-stage'
 import { Sidebar } from '@/components/sidebar'
 import { CharacterAudioTab } from '@/components/character-audio-tab'
 import { CharacterDialoguesTab } from '@/components/character-dialogues-tab'
+import { CharacterKnowledgeTab } from '@/components/character-knowledge-tab'
 
 const KIND_LABEL: Record<ExpressionKind, string> = {
   mouth_closed: '口閉じ',
@@ -301,6 +302,9 @@ export default function CharactersPage() {
         character={detailChar}
         open={!!detailChar}
         onClose={() => setDetailId(null)}
+        onCharacterChange={(updated) =>
+          setCharacters((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
+        }
       />
     </div>
   )
@@ -312,10 +316,12 @@ function CharacterDetailDialog({
   character,
   open,
   onClose,
+  onCharacterChange,
 }: {
   character: Character | null
   open: boolean
   onClose: () => void
+  onCharacterChange: (next: Character) => void
 }) {
   const [expressions, setExpressions] = useState<CharacterExpression[]>([])
   const [audioFiles, setAudioFiles] = useState<AudioFile[]>([])
@@ -384,11 +390,12 @@ function CharacterDetailDialog({
           <p className="text-center text-muted-foreground py-8">読み込み中...</p>
         ) : (
           <Tabs defaultValue="preview" className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="preview">プレビュー</TabsTrigger>
               <TabsTrigger value="expressions">表情</TabsTrigger>
               <TabsTrigger value="audio">音声</TabsTrigger>
               <TabsTrigger value="dialogues">セリフ</TabsTrigger>
+              <TabsTrigger value="knowledge">ナレッジ</TabsTrigger>
             </TabsList>
 
             <TabsContent value="preview" className="mt-4">
@@ -499,6 +506,10 @@ function CharacterDetailDialog({
                 expressions={expressions}
                 onChange={setDialogues}
               />
+            </TabsContent>
+
+            <TabsContent value="knowledge" className="mt-4">
+              <CharacterKnowledgeTab character={character} onChange={onCharacterChange} />
             </TabsContent>
           </Tabs>
         )}

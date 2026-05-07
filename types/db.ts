@@ -1,11 +1,25 @@
 // 共通型定義(将来DBを再構築するときにここを拡張する)
 
+// キャラクターのナレッジベース。将来 Claude API に prompt context として渡す前提で
+// セクション分割しておく(セリフ自動生成・シナリオ展開などで使い回せるように)。
+export interface CharacterKnowledge {
+  basic_setting: string
+  personality: string
+  speech_pattern: string
+  backstory: string
+  preferences: string
+  relationships: string
+  sample_dialogues: string
+  notes: string
+}
+
 export interface Character {
   id: string
   name: string
   description: string | null
   image_url: string | null // blob URL (derived from image_blob at runtime)
   image_blob?: Blob // メイン画像(口閉じ/通常)
+  knowledge?: CharacterKnowledge | null
   created_at: string
   updated_at: string
 }
