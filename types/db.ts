@@ -2,9 +2,13 @@
 
 // キャラクターのナレッジベース。将来 Claude API に prompt context として渡す前提で
 // セクション分割しておく(セリフ自動生成・シナリオ展開などで使い回せるように)。
+//
+// motivation(行動原理) はキャラを動かす根本動機・恐れ・欲求を書く欄。
+// AI で自然なセリフ・行動を出すための「なぜ」の根拠になる。
 export interface CharacterKnowledge {
   basic_setting: string
   personality: string
+  motivation: string
   speech_pattern: string
   backstory: string
   preferences: string

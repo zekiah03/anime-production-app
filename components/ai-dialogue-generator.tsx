@@ -16,6 +16,7 @@ import type { Character, CharacterKnowledge } from '@/types/db'
 const EMPTY_KNOWLEDGE: CharacterKnowledge = {
   basic_setting: '',
   personality: '',
+  motivation: '',
   speech_pattern: '',
   backstory: '',
   preferences: '',
