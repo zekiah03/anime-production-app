@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Cloud, CloudUpload, CloudDownload, Trash2, RefreshCw } from 'lucide-react'
+import { Cloud, CloudUpload, CloudDownload, Trash2, RefreshCw, Link2, Unlink } from 'lucide-react'
 import {
   deleteCloudProject,
   listCloudProjects,
@@ -18,6 +18,7 @@ import {
   saveProjectToCloud,
   type CloudProject,
 } from '@/lib/cloud-sync'
+import { useAutoSync } from '@/components/auto-sync-provider'
 
 interface Props {
   open: boolean
@@ -37,6 +38,7 @@ export function CloudSyncDialog({ open, onClose }: Props) {
   const [refreshing, setRefreshing] = useState(false)
   const [name, setName] = useState('')
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
+  const autoSync = useAutoSync()
 
   const refresh = async () => {
     setRefreshing(true)
@@ -64,8 +66,10 @@ export function CloudSyncDialog({ open, onClose }: Props) {
     }
     setStatus({ kind: 'saving' })
     try {
-      await saveProjectToCloud(name.trim())
-      setStatus({ kind: 'done', message: 'クラウドに保存しました' })
+      const created = await saveProjectToCloud(name.trim())
+      // 自動同期のターゲットを今作ったプロジェクトに切り替える
+      autoSync.setCurrent({ id: created.id, name: created.name })
+      setStatus({ kind: 'done', message: 'クラウドに保存しました(自動同期 ON)' })
       setName('')
       await refresh()
     } catch (e) {
@@ -83,7 +87,14 @@ export function CloudSyncDialog({ open, onClose }: Props) {
     setStatus({ kind: 'loading' })
     try {
       await loadProjectFromCloud(id)
-      setStatus({ kind: 'done', message: '読込完了。ページを再読み込みしてください' })
+      const target = projects.find((p) => p.id === id)
+      if (target) {
+        autoSync.setCurrent({ id: target.id, name: target.name })
+      }
+      setStatus({
+        kind: 'done',
+        message: '読込完了。ページを再読み込みしてください(自動同期 ON)',
+      })
     } catch (e) {
       setStatus({ kind: 'error', message: (e as Error).message })
     }
@@ -94,6 +105,10 @@ export function CloudSyncDialog({ open, onClose }: Props) {
     setStatus({ kind: 'deleting', id })
     try {
       await deleteCloudProject(id)
+      // 削除されたのが現在の同期対象だった場合、リンク解除
+      if (autoSync.current?.id === id) {
+        autoSync.setCurrent(null)
+      }
       setStatus({ kind: 'done', message: '削除しました' })
       await refresh()
     } catch (e) {
@@ -117,6 +132,39 @@ export function CloudSyncDialog({ open, onClose }: Props) {
         </DialogHeader>
 
         <div className="space-y-5">
+          {/* Current project */}
+          {autoSync.current ? (
+            <div className="border border-primary/40 rounded-lg p-3 bg-primary/10 flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1 flex items-center gap-2">
+                <Link2 size={16} className="text-primary flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">
+                    自動同期中: {autoSync.current.name}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    編集の数秒後にこのプロジェクトへ自動でクラウド保存されます
+                  </p>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => autoSync.setCurrent(null)}
+                className="gap-1 flex-shrink-0"
+              >
+                <Unlink size={14} />
+                切断
+              </Button>
+            </div>
+          ) : (
+            <div className="border border-border rounded-lg p-3 bg-muted/30 flex items-center gap-2">
+              <Unlink size={14} className="text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">
+                自動同期 OFF。下で新規保存するか既存を読み込むと自動同期が開始します
+              </p>
+            </div>
+          )}
+
           {/* Save */}
           <div className="border border-border rounded-lg p-4 bg-muted/30">
             <h4 className="font-semibold mb-3 flex items-center gap-2">
@@ -166,10 +214,19 @@ export function CloudSyncDialog({ open, onClose }: Props) {
                 {projects.map((p) => (
                   <li
                     key={p.id}
-                    className="flex items-center justify-between gap-2 p-3 bg-background border border-border rounded"
+                    className={`flex items-center justify-between gap-2 p-3 rounded border ${
+                      autoSync.current?.id === p.id
+                        ? 'bg-primary/10 border-primary/40'
+                        : 'bg-background border-border'
+                    }`}
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium truncate">{p.name}</p>
+                      <p className="text-sm font-medium truncate flex items-center gap-1">
+                        {autoSync.current?.id === p.id && (
+                          <Link2 size={12} className="text-primary flex-shrink-0" />
+                        )}
+                        {p.name}
+                      </p>
                       <p className="text-xs text-muted-foreground">
                         {new Date(p.updated_at).toLocaleString('ja-JP')}
                       </p>

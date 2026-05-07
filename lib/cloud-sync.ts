@@ -67,7 +67,7 @@ async function downloadBlob(url: string): Promise<Blob> {
 
 // ==================== Save ====================
 
-export async function saveProjectToCloud(name: string): Promise<CloudProject> {
+async function buildSnapshot(): Promise<ProjectSnapshot> {
   const [characters, expressions, audioFiles, dialogues, scenes, sceneDialogues, illustrations] =
     await Promise.all([
       getAllCharacters(),
@@ -83,7 +83,7 @@ export async function saveProjectToCloud(name: string): Promise<CloudProject> {
     await Promise.all(illustrations.map((i) => getLayersByIllustration(i.id)))
   ).flat()
 
-  // Storage に上げて public URL に書き換える
+  // Storage に上げて public URL に書き換える(upsert なので ID が同じなら上書き)
   const charactersOut: Character[] = []
   for (const c of characters) {
     let url: string | null = c.image_url
@@ -95,6 +95,7 @@ export async function saveProjectToCloud(name: string): Promise<CloudProject> {
       name: c.name,
       description: c.description,
       image_url: url,
+      knowledge: c.knowledge ?? null,
       created_at: c.created_at,
       updated_at: c.updated_at,
     })
@@ -150,7 +151,7 @@ export async function saveProjectToCloud(name: string): Promise<CloudProject> {
     })
   }
 
-  const snapshot: ProjectSnapshot = {
+  return {
     version: 1,
     characters: charactersOut,
     expressions: expressionsOut,
@@ -161,13 +162,29 @@ export async function saveProjectToCloud(name: string): Promise<CloudProject> {
     illustrations,
     layers: layersOut,
   }
+}
 
+export async function saveProjectToCloud(name: string): Promise<CloudProject> {
+  const snapshot = await buildSnapshot()
   const { data, error } = await supabase
     .from('anime')
     .insert({ name, data: snapshot, updated_at: new Date().toISOString() })
     .select('id, name, updated_at')
     .single()
   if (error) throw new Error(`anime insert failed: ${error.message}`)
+  return data as CloudProject
+}
+
+// 既存の anime 行を更新する。自動同期で使う。
+export async function updateProjectInCloud(id: number): Promise<CloudProject> {
+  const snapshot = await buildSnapshot()
+  const { data, error } = await supabase
+    .from('anime')
+    .update({ data: snapshot, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('id, name, updated_at')
+    .single()
+  if (error) throw new Error(`anime update failed: ${error.message}`)
   return data as CloudProject
 }
 

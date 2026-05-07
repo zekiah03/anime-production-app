@@ -99,6 +99,30 @@ function getDB() {
   return dbPromise
 }
 
+// ==================== Change notifications ====================
+// データ変更を購読してデバウンス付きクラウド同期に流すための簡易 EventEmitter。
+// 各 save*/delete* の最後で notifyChange() を呼ぶ。
+
+type DBChangeListener = () => void
+const changeListeners = new Set<DBChangeListener>()
+
+export function onDBChange(listener: DBChangeListener): () => void {
+  changeListeners.add(listener)
+  return () => {
+    changeListeners.delete(listener)
+  }
+}
+
+function notifyChange() {
+  changeListeners.forEach((l) => {
+    try {
+      l()
+    } catch (e) {
+      console.warn('[anime-app] DB change listener threw', e)
+    }
+  })
+}
+
 // ==================== Characters ====================
 
 function hydrateCharacter(stored: StoredCharacter): Character {
@@ -121,6 +145,7 @@ export async function saveCharacter(character: Character): Promise<void> {
   const { image_url: _image_url, ...rest } = character
   void _image_url
   await db.put('characters', rest as StoredCharacter)
+  notifyChange()
 }
 
 export async function deleteCharacter(id: string): Promise<void> {
@@ -145,6 +170,7 @@ export async function deleteCharacter(id: string): Promise<void> {
     await cursor.delete()
   }
   await tx.done
+  notifyChange()
 }
 
 // ==================== Character Expressions ====================
@@ -180,11 +206,13 @@ export async function saveExpression(expr: CharacterExpression): Promise<void> {
   const { image_url: _image_url, ...rest } = expr
   void _image_url
   await db.put('character_expressions', { ...rest, image_blob: expr.image_blob })
+  notifyChange()
 }
 
 export async function deleteExpression(id: string): Promise<void> {
   const db = await getDB()
   await db.delete('character_expressions', id)
+  notifyChange()
 }
 
 // ==================== Audio ====================
@@ -210,6 +238,7 @@ export async function saveAudioFile(audio: AudioFile): Promise<void> {
   const { file_url: _file_url, ...rest } = audio
   void _file_url
   await db.put('audio_files', { ...rest, file_blob: audio.file_blob })
+  notifyChange()
 }
 
 export async function deleteAudioFile(id: string): Promise<void> {
@@ -225,6 +254,7 @@ export async function deleteAudioFile(id: string): Promise<void> {
     }
   }
   await tx.done
+  notifyChange()
 }
 
 // ==================== Dialogues ====================
@@ -238,6 +268,7 @@ export async function getAllDialogues(): Promise<Dialogue[]> {
 export async function saveDialogue(dialogue: Dialogue): Promise<void> {
   const db = await getDB()
   await db.put('dialogues', dialogue)
+  notifyChange()
 }
 
 export async function deleteDialogue(id: string): Promise<void> {
@@ -251,6 +282,7 @@ export async function deleteDialogue(id: string): Promise<void> {
     await cursor.delete()
   }
   await tx.done
+  notifyChange()
 }
 
 // ==================== Scenes ====================
@@ -264,6 +296,7 @@ export async function getAllScenes(): Promise<Scene[]> {
 export async function saveScene(scene: Scene): Promise<void> {
   const db = await getDB()
   await db.put('scenes', scene)
+  notifyChange()
 }
 
 export async function saveScenesBatch(scenes: Scene[]): Promise<void> {
@@ -271,6 +304,7 @@ export async function saveScenesBatch(scenes: Scene[]): Promise<void> {
   const tx = db.transaction('scenes', 'readwrite')
   await Promise.all(scenes.map((s) => tx.store.put(s)))
   await tx.done
+  notifyChange()
 }
 
 export async function deleteScene(id: string): Promise<void> {
@@ -284,6 +318,7 @@ export async function deleteScene(id: string): Promise<void> {
     await cursor.delete()
   }
   await tx.done
+  notifyChange()
 }
 
 // ==================== Scene Dialogues ====================
@@ -296,11 +331,13 @@ export async function getAllSceneDialogues(): Promise<SceneDialogue[]> {
 export async function saveSceneDialogue(sd: SceneDialogue): Promise<void> {
   const db = await getDB()
   await db.put('scene_dialogues', sd)
+  notifyChange()
 }
 
 export async function deleteSceneDialogue(id: string): Promise<void> {
   const db = await getDB()
   await db.delete('scene_dialogues', id)
+  notifyChange()
 }
 
 // ==================== Illustrations ====================
@@ -314,6 +351,7 @@ export async function getAllIllustrations(): Promise<Illustration[]> {
 export async function saveIllustration(illust: Illustration): Promise<void> {
   const db = await getDB()
   await db.put('illustrations', illust)
+  notifyChange()
 }
 
 export async function deleteIllustration(id: string): Promise<void> {
@@ -327,6 +365,7 @@ export async function deleteIllustration(id: string): Promise<void> {
     await cursor.delete()
   }
   await tx.done
+  notifyChange()
 }
 
 // ==================== Layers ====================
@@ -350,6 +389,7 @@ export async function saveLayer(layer: Layer): Promise<void> {
   const { image_url: _image_url, ...rest } = layer
   void _image_url
   await db.put('layers', { ...rest, image_blob: layer.image_blob })
+  notifyChange()
 }
 
 export async function saveLayersBatch(layers: Layer[]): Promise<void> {
@@ -365,11 +405,13 @@ export async function saveLayersBatch(layers: Layer[]): Promise<void> {
       }),
   )
   await tx.done
+  notifyChange()
 }
 
 export async function deleteLayer(id: string): Promise<void> {
   const db = await getDB()
   await db.delete('layers', id)
+  notifyChange()
 }
 
 // ==================== Counts (for dashboard) ====================
