@@ -720,29 +720,6 @@ export default function StoryboardPage() {
   }
 
   // ある動画にシーンを移す(シーン編集フォームから使う)
-  async function handleMoveSceneToVideo(sceneId: string, videoId: string | null) {
-    const scene = scenes.find((s) => s.id === sceneId)
-    if (!scene) return
-    const updated: Scene = {
-      id: scene.id,
-      title: scene.title,
-      description: scene.description,
-      background_illustration_id: scene.background_illustration_id,
-      bgm_track_id: scene.bgm_track_id,
-      bgm_volume: scene.bgm_volume,
-      video_id: videoId,
-      order_index: scene.order_index,
-      created_at: scene.created_at,
-      updated_at: new Date().toISOString(),
-    }
-    await saveScene(updated)
-    setScenes((prev) =>
-      prev.map((s) =>
-        s.id === sceneId ? { ...updated, dialogues: s.dialogues } : s,
-      ),
-    )
-  }
-
   // タイムライン用: 各セリフ(SceneDialogue)の所要時間などを計算する
   function buildTimelineClips(scene: SceneWithDialogues): TimelineClip[] {
     return scene.dialogues.map((sd) => {

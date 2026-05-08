@@ -1,5 +1,22 @@
 // 共通型定義(将来DBを再構築するときにここを拡張する)
 
+// キャラクターのナレッジベース。将来 Claude API に prompt context として渡す前提で
+// セクション分割しておく(セリフ自動生成・シナリオ展開などで使い回せるように)。
+//
+// motivation(行動原理) はキャラを動かす根本動機・恐れ・欲求を書く欄。
+// AI で自然なセリフ・行動を出すための「なぜ」の根拠になる。
+export interface CharacterKnowledge {
+  basic_setting: string
+  personality: string
+  motivation: string
+  speech_pattern: string
+  backstory: string
+  preferences: string
+  relationships: string
+  sample_dialogues: string
+  notes: string
+}
+
 // ==================== テロップ(字幕)スタイル ====================
 // 全シーン共通の見た目設定。singleton として settings ストアに保存する。
 
@@ -51,6 +68,7 @@ export interface Character {
   description: string | null
   image_url: string | null // blob URL (derived from image_blob at runtime)
   image_blob?: Blob // メイン画像(口閉じ/通常)
+  knowledge?: CharacterKnowledge | null
   created_at: string
   updated_at: string
 }
@@ -78,12 +96,16 @@ export interface AudioFile {
   created_at: string
 }
 
+export type CharacterPosition = 'left' | 'center' | 'right'
+
 export interface Dialogue {
   id: string
   text: string
   character_id: string | null
   audio_id: string | null
   expression_id: string | null // プレビュー時の表情指定
+  position?: CharacterPosition | null // 立ち位置(null は center 扱い)
+  scale?: number | null // 拡大率(null は 1.0 扱い)
   emotion: string | null
   notes: string | null
   // ナレーション(character_id=null)かつ audio なしのときの表示時間 ms。未指定なら 3000。
@@ -117,36 +139,6 @@ export type SceneColorTag =
   | 'blue'
   | 'purple'
   | 'gray'
-
-// AI 設定(ローカル端末にのみ保存される。外部に送信されることはないが、
-// API 呼び出し時はそのプロバイダへ送られる)
-export type AiProvider = 'openai' | 'anthropic' | 'gemini'
-
-export interface AiSettings {
-  provider: AiProvider
-  // プロバイダごとに鍵を保持(切替時にいちいち再入力しなくて済むように)
-  apiKeys: {
-    openai?: string
-    anthropic?: string
-    gemini?: string
-  }
-  // モデル名。プロバイダごとに自由なので string で持つ
-  model: string
-  // 0..2。生成の多様性
-  temperature?: number
-  // 有効/無効の全体スイッチ(OFF にすると UI から AI ボタンが消える)
-  enabled: boolean
-}
-
-// API キーはアプリコードに一切組み込まず、端末の IndexedDB にのみ保存する。
-// 初期値は空(ユーザーが /settings から自分の鍵を入れるまでは AI は無効)。
-export const DEFAULT_AI_SETTINGS: AiSettings = {
-  provider: 'openai',
-  apiKeys: {},
-  model: 'gpt-4o-mini',
-  temperature: 0.7,
-  enabled: false,
-}
 
 // シーンの入れ物。複数本の動画をこのアプリ1つで作り分けるために使う。
 export interface Video {

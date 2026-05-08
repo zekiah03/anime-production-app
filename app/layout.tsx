@@ -6,6 +6,7 @@ import { ToastProvider } from '@/components/toast'
 import { AppErrorBoundary } from '@/components/error-boundary'
 import { ServiceWorkerRegister } from '@/components/sw-register'
 import { FirstTimeTour } from '@/components/first-time-tour'
+import { AutoSyncProvider } from '@/components/auto-sync-provider'
 
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
@@ -56,9 +57,11 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         <AppErrorBoundary>
           <ToastProvider>
-            <ServiceWorkerRegister />
-            <FirstTimeTour />
-            {children}
+            <AutoSyncProvider>
+              <ServiceWorkerRegister />
+              <FirstTimeTour />
+              {children}
+            </AutoSyncProvider>
           </ToastProvider>
         </AppErrorBoundary>
         {process.env.NODE_ENV === 'production' && <Analytics />}

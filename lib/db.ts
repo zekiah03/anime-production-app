@@ -4,7 +4,6 @@
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import type {
-  AiSettings,
   Character,
   CharacterExpression,
   AudioFile,
@@ -20,7 +19,7 @@ import type {
   TelopStyle,
   Video,
 } from '@/types/db'
-import { DEFAULT_AI_SETTINGS, DEFAULT_TELOP_STYLE } from '@/types/db'
+import { DEFAULT_TELOP_STYLE } from '@/types/db'
 
 const DB_NAME = 'anime-production'
 const DB_VERSION = 8
@@ -67,9 +66,7 @@ interface AnimeDB extends DBSchema {
   // settings: id をキーにした singleton。'telop' / 'ai' など設定ごとにレコードを分ける
   settings: {
     key: string
-    value:
-      | { id: 'telop'; telop_style?: TelopStyle }
-      | { id: 'ai'; ai_settings?: AiSettings }
+    value: { id: 'telop'; telop_style?: TelopStyle }
   }
   // シーンの登場キャラ(複数キャラを同時配置)
   scene_cast: {
@@ -148,6 +145,30 @@ function getDB() {
   return dbPromise
 }
 
+// ==================== Change notifications ====================
+// データ変更を購読してデバウンス付きクラウド同期に流すための簡易 EventEmitter。
+// 各 save*/delete* の最後で notifyChange() を呼ぶ。
+
+type DBChangeListener = () => void
+const changeListeners = new Set<DBChangeListener>()
+
+export function onDBChange(listener: DBChangeListener): () => void {
+  changeListeners.add(listener)
+  return () => {
+    changeListeners.delete(listener)
+  }
+}
+
+function notifyChange() {
+  changeListeners.forEach((l) => {
+    try {
+      l()
+    } catch (e) {
+      console.warn('[anime-app] DB change listener threw', e)
+    }
+  })
+}
+
 // ==================== Characters ====================
 
 function hydrateCharacter(stored: StoredCharacter): Character {
@@ -170,6 +191,7 @@ export async function saveCharacter(character: Character): Promise<void> {
   const { image_url: _image_url, ...rest } = character
   void _image_url
   await db.put('characters', rest as StoredCharacter)
+  notifyChange()
 }
 
 export async function deleteCharacter(id: string): Promise<void> {
@@ -198,6 +220,7 @@ export async function deleteCharacter(id: string): Promise<void> {
     await cursor.delete()
   }
   await tx.done
+  notifyChange()
 }
 
 // ==================== Character Expressions ====================
@@ -233,11 +256,13 @@ export async function saveExpression(expr: CharacterExpression): Promise<void> {
   const { image_url: _image_url, ...rest } = expr
   void _image_url
   await db.put('character_expressions', { ...rest, image_blob: expr.image_blob })
+  notifyChange()
 }
 
 export async function deleteExpression(id: string): Promise<void> {
   const db = await getDB()
   await db.delete('character_expressions', id)
+  notifyChange()
 }
 
 // ==================== Audio ====================
@@ -263,6 +288,7 @@ export async function saveAudioFile(audio: AudioFile): Promise<void> {
   const { file_url: _file_url, ...rest } = audio
   void _file_url
   await db.put('audio_files', { ...rest, file_blob: audio.file_blob })
+  notifyChange()
 }
 
 export async function deleteAudioFile(id: string): Promise<void> {
@@ -278,6 +304,7 @@ export async function deleteAudioFile(id: string): Promise<void> {
     }
   }
   await tx.done
+  notifyChange()
 }
 
 // ==================== Dialogues ====================
@@ -291,6 +318,7 @@ export async function getAllDialogues(): Promise<Dialogue[]> {
 export async function saveDialogue(dialogue: Dialogue): Promise<void> {
   const db = await getDB()
   await db.put('dialogues', dialogue)
+  notifyChange()
 }
 
 export async function deleteDialogue(id: string): Promise<void> {
@@ -304,6 +332,7 @@ export async function deleteDialogue(id: string): Promise<void> {
     await cursor.delete()
   }
   await tx.done
+  notifyChange()
 }
 
 // ==================== Scenes ====================
@@ -317,6 +346,7 @@ export async function getAllScenes(): Promise<Scene[]> {
 export async function saveScene(scene: Scene): Promise<void> {
   const db = await getDB()
   await db.put('scenes', scene)
+  notifyChange()
 }
 
 export async function saveScenesBatch(scenes: Scene[]): Promise<void> {
@@ -324,6 +354,7 @@ export async function saveScenesBatch(scenes: Scene[]): Promise<void> {
   const tx = db.transaction('scenes', 'readwrite')
   await Promise.all(scenes.map((s) => tx.store.put(s)))
   await tx.done
+  notifyChange()
 }
 
 export async function deleteScene(id: string): Promise<void> {
@@ -341,6 +372,7 @@ export async function deleteScene(id: string): Promise<void> {
     await cursor.delete()
   }
   await tx.done
+  notifyChange()
 }
 
 // ==================== Scene Dialogues ====================
@@ -353,11 +385,13 @@ export async function getAllSceneDialogues(): Promise<SceneDialogue[]> {
 export async function saveSceneDialogue(sd: SceneDialogue): Promise<void> {
   const db = await getDB()
   await db.put('scene_dialogues', sd)
+  notifyChange()
 }
 
 export async function deleteSceneDialogue(id: string): Promise<void> {
   const db = await getDB()
   await db.delete('scene_dialogues', id)
+  notifyChange()
 }
 
 // ==================== Illustrations ====================
@@ -371,6 +405,7 @@ export async function getAllIllustrations(): Promise<Illustration[]> {
 export async function saveIllustration(illust: Illustration): Promise<void> {
   const db = await getDB()
   await db.put('illustrations', illust)
+  notifyChange()
 }
 
 export async function deleteIllustration(id: string): Promise<void> {
@@ -384,6 +419,7 @@ export async function deleteIllustration(id: string): Promise<void> {
     await cursor.delete()
   }
   await tx.done
+  notifyChange()
 }
 
 // ==================== Layers ====================
@@ -407,6 +443,7 @@ export async function saveLayer(layer: Layer): Promise<void> {
   const { image_url: _image_url, ...rest } = layer
   void _image_url
   await db.put('layers', { ...rest, image_blob: layer.image_blob })
+  notifyChange()
 }
 
 export async function saveLayersBatch(layers: Layer[]): Promise<void> {
@@ -422,11 +459,13 @@ export async function saveLayersBatch(layers: Layer[]): Promise<void> {
       }),
   )
   await tx.done
+  notifyChange()
 }
 
 export async function deleteLayer(id: string): Promise<void> {
   const db = await getDB()
   await db.delete('layers', id)
+  notifyChange()
 }
 
 // ==================== BGM Tracks ====================
@@ -452,6 +491,7 @@ export async function saveBgmTrack(track: BgmTrack): Promise<void> {
   const { file_url: _file_url, ...rest } = track
   void _file_url
   await db.put('bgm_tracks', { ...rest, file_blob: track.file_blob })
+  notifyChange()
 }
 
 export async function deleteBgmTrack(id: string): Promise<void> {
@@ -466,6 +506,7 @@ export async function deleteBgmTrack(id: string): Promise<void> {
     }
   }
   await tx.done
+  notifyChange()
 }
 
 // ==================== Sound Effects ====================
@@ -491,6 +532,7 @@ export async function saveSoundEffect(se: SoundEffect): Promise<void> {
   const { file_url: _file_url, ...rest } = se
   void _file_url
   await db.put('sound_effects', { ...rest, file_blob: se.file_blob })
+  notifyChange()
 }
 
 export async function deleteSoundEffect(id: string): Promise<void> {
@@ -505,6 +547,7 @@ export async function deleteSoundEffect(id: string): Promise<void> {
     }
   }
   await tx.done
+  notifyChange()
 }
 
 // ==================== Cast Presets ====================
@@ -518,11 +561,13 @@ export async function getAllCastPresets(): Promise<CastPreset[]> {
 export async function saveCastPreset(preset: CastPreset): Promise<void> {
   const db = await getDB()
   await db.put('cast_presets', preset)
+  notifyChange()
 }
 
 export async function deleteCastPreset(id: string): Promise<void> {
   const db = await getDB()
   await db.delete('cast_presets', id)
+  notifyChange()
 }
 
 // ==================== Videos(シーンの入れ物) ====================
@@ -536,6 +581,7 @@ export async function getAllVideos(): Promise<Video[]> {
 export async function saveVideo(video: Video): Promise<void> {
   const db = await getDB()
   await db.put('videos', video)
+  notifyChange()
 }
 
 export async function deleteVideo(id: string): Promise<void> {
@@ -549,6 +595,7 @@ export async function deleteVideo(id: string): Promise<void> {
     }
   }
   await tx.done
+  notifyChange()
 }
 
 // ==================== Scene Cast ====================
@@ -567,11 +614,13 @@ export async function getSceneCast(sceneId: string): Promise<SceneCastMember[]> 
 export async function saveSceneCastMember(member: SceneCastMember): Promise<void> {
   const db = await getDB()
   await db.put('scene_cast', member)
+  notifyChange()
 }
 
 export async function deleteSceneCastMember(id: string): Promise<void> {
   const db = await getDB()
   await db.delete('scene_cast', id)
+  notifyChange()
 }
 
 // ==================== Settings (singleton) ====================
@@ -585,18 +634,7 @@ export async function getTelopStyle(): Promise<TelopStyle> {
 export async function saveTelopStyle(style: TelopStyle): Promise<void> {
   const db = await getDB()
   await db.put('settings', { id: 'telop', telop_style: style })
-}
-
-export async function getAiSettings(): Promise<AiSettings> {
-  const db = await getDB()
-  const row = await db.get('settings', 'ai')
-  if (!row || row.id !== 'ai') return DEFAULT_AI_SETTINGS
-  return row.ai_settings ?? DEFAULT_AI_SETTINGS
-}
-
-export async function saveAiSettings(s: AiSettings): Promise<void> {
-  const db = await getDB()
-  await db.put('settings', { id: 'ai', ai_settings: s })
+  notifyChange()
 }
 
 // ==================== Raw access (for export/import) ====================
