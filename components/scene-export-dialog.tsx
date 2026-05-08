@@ -773,7 +773,7 @@ export function SceneExportDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-auto">
+      <DialogContent className="max-w-[min(92vw,900px)] max-h-[92vh] overflow-auto sm:rounded-lg">
         <DialogHeader>
           <DialogTitle>{scene?.title ?? 'シーン'} を動画として書き出し</DialogTitle>
           <DialogDescription>

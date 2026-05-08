@@ -5443,7 +5443,7 @@ function ScenePlayerDialog({
 
   return (
     <Dialog open={!!scene} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-[min(94vw,1200px)] max-h-[92vh] overflow-auto sm:rounded-lg">
         <DialogHeader>
           <DialogTitle>{title ?? `${scene.title} を再生`}</DialogTitle>
           <DialogDescription>

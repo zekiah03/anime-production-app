@@ -121,7 +121,7 @@ export function CloudSyncDialog({ open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xl max-h-[90vh] overflow-auto">
+      <DialogContent className="max-w-[min(92vw,900px)] max-h-[92vh] overflow-auto sm:rounded-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Cloud size={20} /> クラウド同期

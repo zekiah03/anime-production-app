@@ -487,7 +487,7 @@ function CharacterDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-auto">
+      <DialogContent className="max-w-[min(96vw,1400px)] max-h-[92vh] overflow-auto sm:rounded-lg">
         <DialogHeader>
           <DialogTitle>{character?.name ?? ''} の詳細</DialogTitle>
           <DialogDescription>表情・音声・セリフをタブから管理できます</DialogDescription>

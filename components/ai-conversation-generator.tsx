@@ -127,7 +127,7 @@ export function AIConversationGenerator({ characters, open, onClose, onAccept }:
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-auto">
+      <DialogContent className="max-w-[min(94vw,1100px)] max-h-[92vh] overflow-auto sm:rounded-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles size={18} className="text-primary" /> AI で掛け合いを生成

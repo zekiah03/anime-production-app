@@ -107,7 +107,7 @@ export function AIDialogueGenerator({ character, open, onClose, onAccept }: Prop
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-auto">
+      <DialogContent className="max-w-[min(92vw,900px)] max-h-[92vh] overflow-auto sm:rounded-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles size={18} className="text-primary" /> AIでセリフ生成

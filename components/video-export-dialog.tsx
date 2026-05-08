@@ -1231,7 +1231,7 @@ export function VideoExportDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-auto">
+      <DialogContent className="max-w-[min(94vw,1200px)] max-h-[92vh] overflow-auto sm:rounded-lg">
         <DialogHeader>
           <DialogTitle>動画「{videoName}」を書き出し</DialogTitle>
           <DialogDescription>

@@ -161,17 +161,16 @@ export function CharacterKnowledgeTab({ character, onChange }: Props) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {FIELDS.map((f) => (
           <div
             key={f.key}
             className={
-              f.key === 'sample_dialogues' ||
-              f.key === 'backstory' ||
-              f.key === 'personality' ||
-              f.key === 'motivation'
-                ? 'md:col-span-2'
-                : ''
+              f.key === 'sample_dialogues' || f.key === 'backstory'
+                ? 'md:col-span-2 xl:col-span-3'
+                : f.key === 'personality' || f.key === 'motivation'
+                  ? 'md:col-span-2 xl:col-span-2'
+                  : ''
             }
           >
             <label className="block text-sm font-medium text-foreground mb-1">{f.label}</label>
