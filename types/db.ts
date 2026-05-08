@@ -188,10 +188,15 @@ export type SceneColorTag =
   | 'gray'
 
 // シーンの入れ物。複数本の動画をこのアプリ1つで作り分けるために使う。
+// 動画の縦横比(YouTube ショート = 9:16, 通常動画 = 16:9, インスタ等 = 1:1)
+export type VideoAspect = '16:9' | '9:16' | '1:1'
+
 export interface Video {
   id: string
   name: string
   order_index: number
+  // 縦横比。プレビューと書き出しで使う(未指定なら 16:9 扱い)
+  aspect_ratio?: VideoAspect | null
   created_at: string
   updated_at: string
 }

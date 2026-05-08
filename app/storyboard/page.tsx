@@ -20,7 +20,7 @@ import { SceneCardSkeleton } from '@/components/skeleton'
 import { resetFirstTimeTour } from '@/components/first-time-tour'
 import { SCENE_COLORS, sceneColorFor } from '@/lib/scene-colors'
 import { charColorHsl } from '@/lib/char-color'
-import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, CharacterMotion, CameraMotion, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, ScreenEffect, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset, SceneColorTag } from '@/types/db'
+import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, CharacterMotion, CameraMotion, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, ScreenEffect, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, VideoAspect, CastPreset, SceneColorTag } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
   clearStore,
@@ -386,6 +386,17 @@ export default function StoryboardPage() {
     await saveVideo(video)
     setVideos((prev) => [...prev, video])
     setSelectedVideoId(video.id)
+  }
+
+  async function handleSetVideoAspect(id: string, aspect: VideoAspect) {
+    const existing = videos.find((v) => v.id === id)
+    if (!existing) return
+    const now = new Date().toISOString()
+    const updated: Video = { ...existing, aspect_ratio: aspect, updated_at: now }
+    setVideos((prev) => prev.map((v) => (v.id === id ? updated : v)))
+    await saveVideo(updated).catch((e) =>
+      console.error('[anime-app] save aspect failed', e),
+    )
   }
 
   async function handleRenameVideo(id: string, name: string) {
@@ -2339,6 +2350,21 @@ export default function StoryboardPage() {
                   </button>
                   {isActive && (
                     <>
+                      <select
+                        value={v.aspect_ratio ?? '16:9'}
+                        onChange={(e) =>
+                          handleSetVideoAspect(
+                            v.id,
+                            e.target.value as VideoAspect,
+                          )
+                        }
+                        className="px-1 py-0.5 bg-card border border-input rounded text-[10px] text-foreground"
+                        title="縦横比(プレビューと書き出しに反映)"
+                      >
+                        <option value="16:9">16:9 横</option>
+                        <option value="9:16">9:16 縦</option>
+                        <option value="1:1">1:1 正方</option>
+                      </select>
                       <button
                         type="button"
                         onClick={() => {
@@ -4474,6 +4500,7 @@ export default function StoryboardPage() {
               telopStyle={telopStyle}
               sceneCast={playScene ? castForScene(playScene.id) : []}
               illustrations={illustrations}
+              videos={videos}
               onClose={() => setPlayingSceneId(null)}
             />
             {/* 動画連続再生: playingVideoId が立ってる間、対象シーンを順に再生 */}
@@ -4507,6 +4534,7 @@ export default function StoryboardPage() {
                   telopStyle={telopStyle}
                   sceneCast={castForScene(currentScene.id)}
                   illustrations={illustrations}
+              videos={videos}
                   autoPlay
                   title={`${videoName}(通し再生)— ${playingVideoSceneIdx + 1}/${orderedScenes.length} ${currentScene.title}`}
                   onQueueEnd={() => {
@@ -4548,6 +4576,7 @@ export default function StoryboardPage() {
                   telopStyle={telopStyle}
                   sceneCast={previewScene ? castForScene(previewScene.id) : []}
                   illustrations={illustrations}
+              videos={videos}
                   startAtSdId={previewingSdId}
                   singleMode
                   onClose={() => setPreviewingSdId(null)}
@@ -5078,6 +5107,9 @@ export default function StoryboardPage() {
             </Dialog>
             <VideoExportDialog
               videoName={videos.find((v) => v.id === exportingVideoId)?.name ?? '動画'}
+              defaultAspect={
+                videos.find((v) => v.id === exportingVideoId)?.aspect_ratio ?? '16:9'
+              }
               scenes={scenes
                 .filter((s) => (s.video_id ?? null) === exportingVideoId)
                 .sort((a, b) => a.order_index - b.order_index)}
@@ -5150,6 +5182,7 @@ function ScenePlayerDialog({
   telopStyle,
   sceneCast,
   illustrations,
+  videos,
   startAtSdId,
   singleMode,
   autoPlay,
@@ -5168,6 +5201,7 @@ function ScenePlayerDialog({
   telopStyle: TelopStyle
   sceneCast: SceneCastMember[]
   illustrations: IllustrationWithLayers[] // PNG スナップショット用
+  videos: Video[] // aspect_ratio 解決用
   startAtSdId?: string | null // この SceneDialogue から再生を開始
   singleMode?: boolean // true のとき 1 セリフだけ再生して停止(プレビュー用)
   autoPlay?: boolean // ダイアログ表示と同時に再生開始(連続再生用)
@@ -5175,6 +5209,8 @@ function ScenePlayerDialog({
   onQueueEnd?: () => void // キューを最後まで再生し終わったときに呼ばれる(連続再生ハンドオフ用)
   onClose: () => void
 }) {
+  const sceneAspect: VideoAspect =
+    (scene?.video_id && videos.find((v) => v.id === scene.video_id)?.aspect_ratio) || '16:9'
   const [index, setIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [playbackRate, setPlaybackRate] = useState(1)
@@ -5415,6 +5451,8 @@ function ScenePlayerDialog({
                 motion={current?.motion ?? null}
                 effect={current?.effect ?? null}
                 cameraMotion={current?.cameraMotion ?? null}
+                colorFilter={scene?.color_filter ?? null}
+                aspect={sceneAspect}
                 playing={playing}
                 onEnded={handleEnded}
               />

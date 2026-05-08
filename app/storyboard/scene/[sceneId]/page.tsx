@@ -591,7 +591,7 @@ export default function SceneEditorPage({
                   )}
                 </div>
               </div>
-              <div className="aspect-video w-full bg-[repeating-conic-gradient(#e5e7eb_0%_25%,transparent_0%_50%)] bg-[length:20px_20px] rounded-lg overflow-hidden border border-border">
+              <div className="w-full bg-[repeating-conic-gradient(#e5e7eb_0%_25%,transparent_0%_50%)] bg-[length:20px_20px] rounded-lg overflow-hidden border border-border">
                 <LipSyncStage
                   character={previewChar}
                   expressions={previewCharExprs}
@@ -610,6 +610,7 @@ export default function SceneEditorPage({
                   effect={previewSd?.effect ?? null}
                   cameraMotion={scene?.camera_motion ?? null}
                   colorFilter={scene?.color_filter ?? null}
+                  aspect={video?.aspect_ratio ?? '16:9'}
                   playing={previewIdx !== null}
                   onEnded={() => {
                     setPreviewIdx((idx) => {

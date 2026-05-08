@@ -390,6 +390,7 @@ interface ResolvedDialogue {
 
 export function VideoExportDialog({
   videoName,
+  defaultAspect,
   scenes,
   characters,
   audioFiles,
@@ -403,6 +404,7 @@ export function VideoExportDialog({
   onClose,
 }: {
   videoName: string
+  defaultAspect?: Aspect
   scenes: SceneWithDialogues[]
   characters: Character[]
   audioFiles: AudioFile[]
@@ -444,7 +446,7 @@ export function VideoExportDialog({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [blobUrl, setBlobUrl] = useState<string | null>(null)
   const [format, setFormat] = useState<Format>('mp4')
-  const [aspect, setAspect] = useState<Aspect>('9:16')
+  const [aspect, setAspect] = useState<Aspect>(defaultAspect ?? '9:16')
   const [quality, setQuality] = useState<Quality>('720p')
   const [convertProgress, setConvertProgress] = useState(0)
   const [ffmpegLoadMsg, setFfmpegLoadMsg] = useState<string | null>(null)

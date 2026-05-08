@@ -11,8 +11,16 @@ import type {
   SceneColorFilter,
   ScreenEffect,
   TelopStyle,
+  VideoAspect,
 } from '@/types/db'
 import { COLOR_FILTER_CSS, DEFAULT_TELOP_STYLE } from '@/types/db'
+
+// CSS の aspect-ratio 値。Tailwind の aspect-* と同じ意味で使えるよう数値文字列。
+const ASPECT_VALUE: Record<VideoAspect, string> = {
+  '16:9': '16 / 9',
+  '9:16': '9 / 16',
+  '1:1': '1 / 1',
+}
 import { toBandStyle, toTextStyle } from '@/components/telop-settings-dialog'
 import { EffectOverlay } from '@/components/effect-overlay'
 
@@ -100,6 +108,8 @@ interface LipSyncStageProps {
   cameraMotion?: CameraMotion | null
   // 色調フィルター(回想・夜など)
   colorFilter?: SceneColorFilter | null
+  // ステージの縦横比(指定があれば aspect-square のデフォルトを上書き)
+  aspect?: VideoAspect | null
   onEnded?: () => void
   className?: string
 }
@@ -137,6 +147,7 @@ export function LipSyncStage({
   effect,
   cameraMotion,
   colorFilter,
+  aspect,
   onEnded,
   className,
 }: LipSyncStageProps) {
@@ -360,12 +371,17 @@ export function LipSyncStage({
 
   const img = displayImage()
 
+  // aspect が明示指定されているときは aspect-* を CSS 変数で上書きする。
+  // className 上書き(callerが完全に指定するパターン)とは独立して動く。
+  const aspectStyle = aspect ? { aspectRatio: ASPECT_VALUE[aspect] } : undefined
+
   return (
     <div
       className={
         className ??
         'flex items-center justify-center bg-background rounded-md border border-border aspect-square overflow-hidden relative'
       }
+      style={aspectStyle}
     >
       {/* カメラワーク用ラッパー: 背景・共演者・発話キャラ・エフェクトをまとめて動かす。
           cameraMotion を変えると key が変わって CSS アニメが頭から再生される。 */}
