@@ -2,9 +2,17 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Users } from 'lucide-react'
-import type { Character, CharacterExpression, CharacterMotion, Layer, TelopStyle } from '@/types/db'
+import type {
+  Character,
+  CharacterExpression,
+  CharacterMotion,
+  Layer,
+  ScreenEffect,
+  TelopStyle,
+} from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import { toBandStyle, toTextStyle } from '@/components/telop-settings-dialog'
+import { EffectOverlay } from '@/components/effect-overlay'
 
 // motion キー名と対応する CSS クラス。none は未指定時のため割り当てなし。
 export const MOTION_CLASS: Record<Exclude<CharacterMotion, 'none'>, string> = {
@@ -65,6 +73,8 @@ interface LipSyncStageProps {
   audioVolume?: number
   // セリフ冒頭で発火するキャラのアクション(セリフごとに変わる前提なので playing の立ち上がりで再生)
   motion?: CharacterMotion | null
+  // 画面エフェクト(playing 中ループ表示)
+  effect?: ScreenEffect | null
   onEnded?: () => void
   className?: string
 }
@@ -99,6 +109,7 @@ export function LipSyncStage({
   playbackRate,
   audioVolume,
   motion,
+  effect,
   onEnded,
   className,
 }: LipSyncStageProps) {
@@ -395,6 +406,7 @@ export function LipSyncStage({
           <p className="text-xs">画像を登録してください</p>
         </div>
       ) : null /* ナレーション: 主役枠は空 */}
+      {playing && <EffectOverlay effect={effect ?? null} />}
       {caption && playing && (
         <div
           className="absolute inset-x-2 pointer-events-none"

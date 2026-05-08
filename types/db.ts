@@ -178,6 +178,20 @@ export type CharacterMotion =
   | 'fade_in'
   | 'zoom_in'
 
+// 画面エフェクト(キャラ近くに表示する emoji or 効果線)
+// anger: 💢, sweat: 💦, sparkle: ✨ * 3, heart: ❤️, shock: ⚡, question: ❓,
+// shock_lines: 集中線(中心へ収束する線), speed_lines: 流線(横に走る線)
+export type ScreenEffect =
+  | 'none'
+  | 'anger'
+  | 'sweat'
+  | 'sparkle'
+  | 'heart'
+  | 'shock'
+  | 'question'
+  | 'shock_lines'
+  | 'speed_lines'
+
 export interface SceneDialogue {
   id: string
   scene_id: string
@@ -200,6 +214,8 @@ export interface SceneDialogue {
   telop_shake?: TelopShake | null
   // セリフ冒頭で発火するキャラのアクション
   motion?: CharacterMotion | null
+  // セリフ中に表示する画面エフェクト
+  effect?: ScreenEffect | null
   created_at: string
 }
 
