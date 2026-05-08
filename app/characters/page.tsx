@@ -654,6 +654,9 @@ function CharacterDetailDialog({
                 character={character}
                 audioFiles={audioFiles}
                 onChange={setAudioFiles}
+                onCreateDialogue={(d) =>
+                  setDialogues((prev) => [d, ...prev])
+                }
               />
             </TabsContent>
 
