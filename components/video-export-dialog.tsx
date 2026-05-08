@@ -13,6 +13,7 @@ import { Download, Square, Video } from 'lucide-react'
 import type {
   AudioFile,
   BgmTrack,
+  CameraMotion,
   Character,
   CharacterExpression,
   CharacterMotion,
@@ -54,6 +55,66 @@ function easePop(t: number): number {
   }
   const u = (t - 0.6) / 0.4
   return 1.1 - 0.1 * u
+}
+
+// シーン全体に適用するカメラの transform。CSS の camera-* と数値的に揃える。
+function applyCamera(
+  ctx: CanvasRenderingContext2D,
+  cameraMotion: CameraMotion | null | undefined,
+  sceneElapsedMs: number,
+  WIDTH: number,
+  HEIGHT: number,
+) {
+  if (!cameraMotion || cameraMotion === 'none') return
+  const SCENE_DUR = 8000 // 8s でフル進行(以降はそのままキープ)
+  switch (cameraMotion) {
+    case 'zoom_in_slow': {
+      const t = Math.min(sceneElapsedMs / SCENE_DUR, 1)
+      const scale = 1.0 + 0.15 * t
+      ctx.translate(WIDTH / 2, HEIGHT / 2)
+      ctx.scale(scale, scale)
+      ctx.translate(-WIDTH / 2, -HEIGHT / 2)
+      return
+    }
+    case 'zoom_out_slow': {
+      const t = Math.min(sceneElapsedMs / SCENE_DUR, 1)
+      const scale = 1.15 - 0.15 * t
+      ctx.translate(WIDTH / 2, HEIGHT / 2)
+      ctx.scale(scale, scale)
+      ctx.translate(-WIDTH / 2, -HEIGHT / 2)
+      return
+    }
+    case 'pan_right': {
+      const t = Math.min(sceneElapsedMs / SCENE_DUR, 1)
+      const dx = (-0.03 + 0.06 * t) * WIDTH
+      ctx.translate(WIDTH / 2 + dx, HEIGHT / 2)
+      ctx.scale(1.08, 1.08)
+      ctx.translate(-WIDTH / 2, -HEIGHT / 2)
+      return
+    }
+    case 'pan_left': {
+      const t = Math.min(sceneElapsedMs / SCENE_DUR, 1)
+      const dx = (0.03 - 0.06 * t) * WIDTH
+      ctx.translate(WIDTH / 2 + dx, HEIGHT / 2)
+      ctx.scale(1.08, 1.08)
+      ctx.translate(-WIDTH / 2, -HEIGHT / 2)
+      return
+    }
+    case 'shake_subtle': {
+      const t = sceneElapsedMs / 400
+      const dx = Math.sin(t * Math.PI * 4) * 1.5
+      const dy = Math.cos(t * Math.PI * 5) * 1.0
+      ctx.translate(dx, dy)
+      return
+    }
+    case 'shake_heavy': {
+      const t = sceneElapsedMs / 300
+      const dx = Math.sin(t * Math.PI * 6) * 5
+      const dy = Math.cos(t * Math.PI * 7) * 4
+      ctx.translate(dx, dy)
+      return
+    }
+  }
 }
 
 function computeShake(kind: TelopShake, elapsedMs: number): { x: number; y: number } {
@@ -526,9 +587,15 @@ export function VideoExportDialog({
     mouthOpen: boolean,
     blinking: boolean,
     elapsedMs: number,
+    cameraMotion: CameraMotion | null,
+    sceneElapsedMs: number,
   ) {
     ctx.fillStyle = '#111111'
     ctx.fillRect(0, 0, WIDTH, HEIGHT)
+
+    // ここから先はカメラの transform 配下(背景〜エフェクト)。テロップは外に置く。
+    ctx.save()
+    applyCamera(ctx, cameraMotion, sceneElapsedMs, WIDTH, HEIGHT)
 
     // 背景
     for (const layer of backgroundLayers) {
@@ -609,6 +676,9 @@ export function VideoExportDialog({
 
     // 画面エフェクト(キャラの上、テロップの下)
     drawEffect(ctx, current.effect, elapsedMs, WIDTH, HEIGHT)
+
+    // カメラ transform を解除(テロップは固定で出したい)
+    ctx.restore()
 
     // テロップ
     if (current.text) {
@@ -840,6 +910,10 @@ export function VideoExportDialog({
           }
         }
 
+        // シーン全体のカメラワーク用の開始時刻
+        const sceneStartAt = performance.now()
+        const sceneCameraMotion = seg.scene.camera_motion ?? null
+
         for (const current of seg.dialogues) {
           if (cancelledRef.current) break
           setProgressIndex(globalIdx)
@@ -954,6 +1028,8 @@ export function VideoExportDialog({
                 mouthOpen,
                 blinking,
                 now - startAt,
+                sceneCameraMotion,
+                now - sceneStartAt,
               )
               raf = requestAnimationFrame(tick)
             }
@@ -993,6 +1069,8 @@ export function VideoExportDialog({
                   false,
                   false,
                   current.silentDurationMs + 99999,
+                  sceneCameraMotion,
+                  now - sceneStartAt,
                 )
                 r = requestAnimationFrame(tick)
               }
