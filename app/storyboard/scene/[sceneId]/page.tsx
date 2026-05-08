@@ -618,6 +618,7 @@ export default function SceneEditorPage({
                   cameraMotion={scene?.camera_motion ?? null}
                   colorFilter={scene?.color_filter ?? null}
                   aspect={video?.aspect_ratio ?? '16:9'}
+                  characterFit={previewSd?.character_fit ?? 'standing'}
                   playing={previewIdx !== null}
                   onEnded={() => {
                     setPreviewIdx((idx) => {

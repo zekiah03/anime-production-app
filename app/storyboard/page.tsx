@@ -1645,6 +1645,7 @@ export default function StoryboardPage() {
         | 'telop_shake'
         | 'motion'
         | 'effect'
+        | 'character_fit'
       >
     >,
   ) {
@@ -1678,6 +1679,7 @@ export default function StoryboardPage() {
               telop_shake: rowPart.telop_shake ?? null,
               motion: rowPart.motion ?? null,
               effect: rowPart.effect ?? null,
+              character_fit: rowPart.character_fit ?? null,
               created_at: rowPart.created_at,
             }
             saveSceneDialogue(row).catch((e) =>
@@ -3896,6 +3898,25 @@ export default function StoryboardPage() {
                                             <option value="shock_lines">集中線</option>
                                             <option value="speed_lines">流線</option>
                                           </select>
+                                          <span className="text-muted-foreground text-xs">|</span>
+                                          <span className="text-xs text-muted-foreground flex-shrink-0">
+                                            画像
+                                          </span>
+                                          <select
+                                            value={sd.character_fit ?? 'standing'}
+                                            onChange={(e) =>
+                                              updateSceneDialogueMeta(scene.id, sd.id, {
+                                                character_fit: e.target.value as
+                                                  | 'standing'
+                                                  | 'fullscreen',
+                                              })
+                                            }
+                                            className="px-2 py-0.5 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                            title="standing: 立ち絵 / fullscreen: 背景込み一枚絵を画面いっぱい"
+                                          >
+                                            <option value="standing">立ち絵</option>
+                                            <option value="fullscreen">フル(背景込み)</option>
+                                          </select>
                                         </div>
                                       </div>
                                     )
@@ -5160,6 +5181,8 @@ interface SceneDialogueResolved {
   effect: ScreenEffect | null
   // シーン全体のカメラワーク(全セリフ共通)
   cameraMotion: CameraMotion | null
+  // キャラ画像のフィット方法
+  characterFit: 'standing' | 'fullscreen'
 }
 
 interface StageExtraResolved {
@@ -5329,6 +5352,7 @@ function ScenePlayerDialog({
         motion: sd.motion ?? null,
         effect: sd.effect ?? null,
         cameraMotion: scene.camera_motion ?? null,
+        characterFit: sd.character_fit ?? 'standing',
       } satisfies SceneDialogueResolved
     })
     // 採用ルール: (キャラ+音声) or (テキストあり= ナレーション)
@@ -5455,6 +5479,7 @@ function ScenePlayerDialog({
                 cameraMotion={current?.cameraMotion ?? null}
                 colorFilter={scene?.color_filter ?? null}
                 aspect={sceneAspect}
+                characterFit={current?.characterFit ?? 'standing'}
                 playing={playing}
                 onEnded={handleEnded}
               />

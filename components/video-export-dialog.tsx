@@ -381,6 +381,7 @@ interface ResolvedDialogue {
   characterX: number
   characterScale: number
   characterFlipped: boolean
+  characterFit: 'standing' | 'fullscreen'
   extras: ExportExtra[]
   silentDurationMs: number
   pauseAfterMs: number
@@ -538,6 +539,7 @@ export function VideoExportDialog({
             characterX,
             characterScale,
             characterFlipped,
+            characterFit: sd.character_fit ?? 'standing',
             extras,
             silentDurationMs,
             pauseAfterMs,
@@ -662,28 +664,45 @@ export function VideoExportDialog({
     if (imgUrl) {
       const img = cache.get(imgUrl)
       if (img) {
-        const fitScale = Math.min(WIDTH / img.width, HEIGHT / img.height)
-        const baseW = img.width * fitScale
-        const baseH = img.height * fitScale
-        const userScale = current.characterScale
-        // motion: dx/dy 移動 + scale 倍率 + alpha 不透明度。基準は身長(baseH)に対する割合。
         const m = computeMotion(current.motion, elapsedMs)
-        const w = baseW * userScale * m.scale
-        const h = baseH * userScale * m.scale
-        const cx = WIDTH * current.characterX + m.dx
-        const x = cx - w / 2
-        // motion の dy は身長基準の割合で扱うと崩れにくい(身長 = baseH * userScale ≒ HEIGHT)
-        const y = HEIGHT - h + m.dy
         const prevAlpha = ctx.globalAlpha
         ctx.globalAlpha = prevAlpha * m.alpha
-        if (current.characterFlipped) {
-          ctx.save()
-          ctx.translate(cx, 0)
-          ctx.scale(-1, 1)
-          ctx.drawImage(img, -w / 2, y, w, h)
-          ctx.restore()
+        if (current.characterFit === 'fullscreen') {
+          // 画面いっぱいに object-cover 相当で敷き詰める。motion は dx/dy/scale を反映。
+          const coverScale = Math.max(WIDTH / img.width, HEIGHT / img.height) * m.scale
+          const w = img.width * coverScale
+          const h = img.height * coverScale
+          const x = (WIDTH - w) / 2 + m.dx
+          const y = (HEIGHT - h) / 2 + m.dy
+          if (current.characterFlipped) {
+            ctx.save()
+            ctx.translate(WIDTH / 2, 0)
+            ctx.scale(-1, 1)
+            ctx.drawImage(img, -(w / 2 + (WIDTH / 2 - x - w / 2)), y, w, h)
+            ctx.restore()
+          } else {
+            ctx.drawImage(img, x, y, w, h)
+          }
         } else {
-          ctx.drawImage(img, x, y, w, h)
+          // 立ち絵: contain でキャンバスに収める基準サイズ → user scale + motion を適用
+          const fitScale = Math.min(WIDTH / img.width, HEIGHT / img.height)
+          const baseW = img.width * fitScale
+          const baseH = img.height * fitScale
+          const userScale = current.characterScale
+          const w = baseW * userScale * m.scale
+          const h = baseH * userScale * m.scale
+          const cx = WIDTH * current.characterX + m.dx
+          const x = cx - w / 2
+          const y = HEIGHT - h + m.dy
+          if (current.characterFlipped) {
+            ctx.save()
+            ctx.translate(cx, 0)
+            ctx.scale(-1, 1)
+            ctx.drawImage(img, -w / 2, y, w, h)
+            ctx.restore()
+          } else {
+            ctx.drawImage(img, x, y, w, h)
+          }
         }
         ctx.globalAlpha = prevAlpha
       }

@@ -268,6 +268,10 @@ export interface SceneDialogue {
   motion?: CharacterMotion | null
   // セリフ中に表示する画面エフェクト
   effect?: ScreenEffect | null
+  // キャラ画像のフィットモード:
+  //   standing(既定): 立ち絵想定。下端アンカー、character_x / character_scale で位置とサイズを調整
+  //   fullscreen: 背景込みの一枚絵想定。画面いっぱいに object-cover で敷き詰める
+  character_fit?: 'standing' | 'fullscreen' | null
   created_at: string
 }
 

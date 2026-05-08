@@ -110,6 +110,8 @@ interface LipSyncStageProps {
   colorFilter?: SceneColorFilter | null
   // ステージの縦横比(指定があれば aspect-square のデフォルトを上書き)
   aspect?: VideoAspect | null
+  // キャラ画像のフィット方法。fullscreen は object-cover で画面いっぱい。
+  characterFit?: 'standing' | 'fullscreen' | null
   onEnded?: () => void
   className?: string
 }
@@ -148,6 +150,7 @@ export function LipSyncStage({
   cameraMotion,
   colorFilter,
   aspect,
+  characterFit,
   onEnded,
   className,
 }: LipSyncStageProps) {
@@ -424,8 +427,26 @@ export function LipSyncStage({
           />
         )
       })}
-      {img ? (
-        // 3層: 外= 絶対配置と中央寄せ / 中= motion アニメーション / 内= 画像 + 左右反転
+      {img && characterFit === 'fullscreen' ? (
+        // 背景込みの一枚絵想定: 画面いっぱいに敷き詰める。motion は適用するが
+        // 立ち位置/サイズ(character_x/scale)は無視。flip だけ反映。
+        <div
+          key={`motion-${motionKey}`}
+          className={`absolute inset-0 ${motionClass}`}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={img}
+            alt={character?.name ?? ''}
+            className="absolute inset-0 w-full h-full"
+            style={{
+              transform: `scaleX(${flipSx})`,
+              objectFit: 'cover',
+            }}
+          />
+        </div>
+      ) : img ? (
+        // 立ち絵想定の 3層: 外= 絶対配置と中央寄せ / 中= motion アニメーション / 内= 画像 + 左右反転
         <div
           className="absolute pointer-events-none"
           style={{
