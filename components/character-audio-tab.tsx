@@ -3,8 +3,9 @@
 import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Music, Pause, Trash2, Play, Sparkles, Loader2, Wand2 } from 'lucide-react'
-import type { AudioFile, Character, CharacterKnowledge, Dialogue } from '@/types/db'
+import { Textarea } from '@/components/ui/textarea'
+import { Music, Pause, Trash2, Play, Loader2, FileText, Plus } from 'lucide-react'
+import type { AudioFile, Character, Dialogue } from '@/types/db'
 import { deleteAudioFile, saveAudioFile, saveDialogue } from '@/lib/db'
 
 interface Props {
@@ -12,98 +13,88 @@ interface Props {
   audioFiles: AudioFile[]
   onChange: (next: AudioFile[]) => void
   // 親(キャラ詳細)の dialogues state を更新するコールバック。
-  // AI 候補から作った Dialogue を即座にセリフタブに反映するために使う。
+  // 文字起こしから作った Dialogue を即座にセリフタブに反映するために使う。
   onCreateDialogue?: (d: Dialogue) => void
-}
-
-interface Suggestion {
-  text: string
-  emotion: string
-  notes: string
-}
-
-const EMPTY_KNOWLEDGE: CharacterKnowledge = {
-  basic_setting: '',
-  personality: '',
-  motivation: '',
-  speech_pattern: '',
-  backstory: '',
-  preferences: '',
-  relationships: '',
-  sample_dialogues: '',
-  notes: '',
 }
 
 export function CharacterAudioTab({ character, audioFiles, onChange, onCreateDialogue }: Props) {
   const [isRecording, setIsRecording] = useState(false)
   const [audioName, setAudioName] = useState('')
   const [playingId, setPlayingId] = useState<string | null>(null)
-  // どの音声に対して AI 候補を出してるか
-  const [suggestForId, setSuggestForId] = useState<string | null>(null)
-  const [scenarioHint, setScenarioHint] = useState('')
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
-  const [suggestLoading, setSuggestLoading] = useState(false)
-  const [suggestError, setSuggestError] = useState<string | null>(null)
-  const [picking, setPicking] = useState<string | null>(null)
+  // どの音声に対して文字起こしパネルを開いているか。
+  const [transcribeForId, setTranscribeForId] = useState<string | null>(null)
+  // 文字起こし API 呼出中の audio.id。
+  const [transcribingId, setTranscribingId] = useState<string | null>(null)
+  // audio.id → 文字起こし結果(編集可能)。
+  const [transcripts, setTranscripts] = useState<Record<string, string>>({})
+  const [transcribeError, setTranscribeError] = useState<string | null>(null)
+  // セリフ追加中の audio.id。
+  const [addingId, setAddingId] = useState<string | null>(null)
 
-  async function handleSuggest(audio: AudioFile) {
-    if (suggestLoading) return
-    setSuggestLoading(true)
-    setSuggestError(null)
-    setSuggestions([])
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+
+  async function handleTranscribe(audio: AudioFile) {
+    if (transcribingId) return
+    if (!audio.file_blob) {
+      setTranscribeError(
+        'この音声のデータが端末に残っていないため文字起こしできません(別端末で録音されたもの等)',
+      )
+      return
+    }
+    setTranscribingId(audio.id)
+    setTranscribeError(null)
     try {
-      const res = await fetch('/api/generate-dialogue', {
+      const fd = new FormData()
+      fd.append('file', audio.file_blob, (audio.name || 'audio') + '.webm')
+      fd.append('language', 'ja')
+      const res = await fetch('/api/transcribe-audio', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          characterName: character.name,
-          knowledge: character.knowledge ?? EMPTY_KNOWLEDGE,
-          scenario:
-            scenarioHint.trim() ||
-            `「${audio.name}」というタイトルで録音した音声に当てる短いセリフを提案してください。録音内容に合いそうな自然な発話。`,
-          count: 5,
-        }),
+        body: fd,
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error ?? `${res.status}`)
-      setSuggestions((data.dialogues ?? []) as Suggestion[])
+      const text = (data.text as string | undefined) ?? ''
+      setTranscripts((prev) => ({ ...prev, [audio.id]: text }))
     } catch (e) {
-      setSuggestError((e as Error).message)
+      setTranscribeError((e as Error).message)
     } finally {
-      setSuggestLoading(false)
+      setTranscribingId(null)
     }
   }
 
-  async function handlePick(audio: AudioFile, sug: Suggestion) {
-    setPicking(audio.id + '|' + sug.text)
+  async function handleAddAsDialogue(audio: AudioFile) {
+    const text = (transcripts[audio.id] ?? '').trim()
+    if (!text) return
+    setAddingId(audio.id)
     try {
       const now = new Date().toISOString()
       const dialogue: Dialogue = {
         id: crypto.randomUUID(),
-        text: sug.text,
+        text,
         character_id: character.id,
         audio_id: audio.id,
         expression_id: null,
-        emotion: sug.emotion || null,
-        notes: sug.notes || null,
+        emotion: null,
+        notes: null,
         duration_ms: null,
         created_at: now,
         updated_at: now,
       }
       await saveDialogue(dialogue)
       onCreateDialogue?.(dialogue)
-      // 候補を閉じる
-      setSuggestForId(null)
-      setSuggestions([])
-      setScenarioHint('')
+      // パネルを閉じてリセット。
+      setTranscribeForId(null)
+      setTranscripts((prev) => {
+        const { [audio.id]: _drop, ...rest } = prev
+        return rest
+      })
     } catch (e) {
-      setSuggestError((e as Error).message)
+      setTranscribeError((e as Error).message)
     } finally {
-      setPicking(null)
+      setAddingId(null)
     }
   }
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
 
   async function startRecording() {
     try {
@@ -204,12 +195,12 @@ export function CharacterAudioTab({ character, audioFiles, onChange, onCreateDia
         ) : (
           <div className="space-y-2">
             {audioFiles.map((audio) => {
-              const isOpen = suggestForId === audio.id
+              const isOpen = transcribeForId === audio.id
+              const transcript = transcripts[audio.id] ?? ''
+              const busyTranscribe = transcribingId === audio.id
+              const busyAdd = addingId === audio.id
               return (
-                <div
-                  key={audio.id}
-                  className="bg-background rounded border border-border"
-                >
+                <div key={audio.id} className="bg-background rounded border border-border">
                   <div className="flex items-center justify-between gap-2 p-3">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-foreground truncate">{audio.name}</p>
@@ -232,20 +223,17 @@ export function CharacterAudioTab({ character, audioFiles, onChange, onCreateDia
                         variant="outline"
                         onClick={() => {
                           if (isOpen) {
-                            setSuggestForId(null)
-                            setSuggestions([])
-                            setSuggestError(null)
+                            setTranscribeForId(null)
+                            setTranscribeError(null)
                           } else {
-                            setSuggestForId(audio.id)
-                            setSuggestions([])
-                            setSuggestError(null)
-                            setScenarioHint('')
+                            setTranscribeForId(audio.id)
+                            setTranscribeError(null)
                           }
                         }}
                         className="gap-1"
-                        title="この音声に対するセリフ候補を AI で生成"
+                        title="この音声を文字起こししてセリフに追加"
                       >
-                        <Sparkles size={14} className="text-primary" />
+                        <FileText size={14} className="text-primary" />
                       </Button>
                       <Button
                         size="sm"
@@ -260,77 +248,60 @@ export function CharacterAudioTab({ character, audioFiles, onChange, onCreateDia
                   </div>
                   {isOpen && (
                     <div className="border-t border-border p-3 bg-muted/30 space-y-3">
-                      <div className="flex flex-col md:flex-row gap-2">
-                        <Input
-                          placeholder="シチュエーションのヒント(任意): 例『屋上で愚痴る』"
-                          value={scenarioHint}
-                          onChange={(e) => setScenarioHint(e.target.value)}
-                          disabled={suggestLoading}
-                        />
+                      <div className="flex items-center gap-2">
                         <Button
                           size="sm"
-                          onClick={() => handleSuggest(audio)}
-                          disabled={suggestLoading}
+                          onClick={() => handleTranscribe(audio)}
+                          disabled={busyTranscribe}
                           className="gap-1 flex-shrink-0"
                         >
-                          {suggestLoading ? (
+                          {busyTranscribe ? (
                             <Loader2 size={14} className="animate-spin" />
                           ) : (
-                            <Wand2 size={14} />
+                            <FileText size={14} />
                           )}
-                          {suggestLoading ? '生成中...' : 'セリフ候補を生成'}
+                          {busyTranscribe ? '文字起こし中...' : '文字起こし(Whisper)'}
                         </Button>
+                        <p className="text-[11px] text-muted-foreground">
+                          OpenAI Whisper でこの録音を日本語に書き起こします
+                        </p>
                       </div>
-                      {suggestError && (
-                        <p className="text-xs text-destructive">{suggestError}</p>
+                      {transcribeError && (
+                        <p className="text-xs text-destructive">{transcribeError}</p>
                       )}
-                      {suggestions.length > 0 && (
-                        <ul className="space-y-1">
-                          {suggestions.map((s, i) => {
-                            const key = audio.id + '|' + s.text
-                            const busy = picking === key
-                            return (
-                              <li
-                                key={i}
-                                className="flex items-start gap-2 p-2 bg-background border border-border rounded hover:border-primary/40 transition"
-                              >
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm text-foreground break-words">{s.text}</p>
-                                  <div className="flex flex-wrap gap-1 mt-1 text-[10px]">
-                                    {s.emotion && s.emotion !== '通常' && (
-                                      <span className="px-1.5 py-0.5 bg-accent/20 text-accent rounded">
-                                        {s.emotion}
-                                      </span>
-                                    )}
-                                    {s.notes && (
-                                      <span className="px-1.5 py-0.5 bg-muted text-muted-foreground rounded">
-                                        {s.notes}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handlePick(audio, s)}
-                                  disabled={busy}
-                                  className="gap-1 flex-shrink-0"
-                                >
-                                  {busy ? (
-                                    <Loader2 size={12} className="animate-spin" />
-                                  ) : (
-                                    <Sparkles size={12} />
-                                  )}
-                                  これにする
-                                </Button>
-                              </li>
-                            )
-                          })}
-                        </ul>
+                      {(transcript || busyTranscribe) && (
+                        <div className="space-y-2">
+                          <Textarea
+                            value={transcript}
+                            onChange={(e) =>
+                              setTranscripts((prev) => ({ ...prev, [audio.id]: e.target.value }))
+                            }
+                            placeholder={busyTranscribe ? '文字起こし中...' : '(まだ結果なし)'}
+                            disabled={busyTranscribe}
+                            rows={3}
+                            className="text-sm"
+                          />
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleAddAsDialogue(audio)}
+                              disabled={busyAdd || !transcript.trim()}
+                              className="gap-1"
+                            >
+                              {busyAdd ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : (
+                                <Plus size={12} />
+                              )}
+                              セリフに追加
+                            </Button>
+                            <p className="text-[10px] text-muted-foreground">
+                              テキストは追加前に編集できます
+                            </p>
+                          </div>
+                        </div>
                       )}
-                      <p className="text-[10px] text-muted-foreground">
-                        選んだ候補は、このキャラの新しいセリフとしてこの音声に紐付けられます
-                      </p>
                     </div>
                   )}
                 </div>
