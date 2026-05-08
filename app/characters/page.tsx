@@ -290,7 +290,7 @@ export default function CharactersPage() {
           )}
 
           {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
               <CharacterCardSkeleton />
               <CharacterCardSkeleton />
               <CharacterCardSkeleton />
@@ -344,7 +344,7 @@ export default function CharactersPage() {
                     該当するキャラクターがありません
                   </Card>
                 ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
               {filtered.map((character) => (
                 <Card key={character.id} className="bg-card border-border p-6 hover:border-primary/50 transition">
                   <div className="flex items-start gap-4 mb-3">

@@ -68,7 +68,7 @@ function SyncBadge() {
 export function Sidebar() {
   const pathname = usePathname()
   return (
-    <aside className="w-64 bg-sidebar border-r border-sidebar-border p-6 flex flex-col">
+    <aside className="w-56 bg-sidebar border-r border-sidebar-border p-5 flex flex-col">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-sidebar-primary">アニメ制作</h1>
         <p className="text-sm text-muted-foreground mt-1">制作支援ツール</p>

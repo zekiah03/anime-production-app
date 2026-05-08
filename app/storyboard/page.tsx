@@ -2578,9 +2578,9 @@ export default function StoryboardPage() {
             </Card>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {/* シーン一覧 */}
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-2 xl:col-span-3">
               <div className="flex items-center justify-between gap-2 flex-wrap mb-4">
                 <h3 className="text-xl font-semibold text-foreground">シーン</h3>
                 <div className="flex items-center gap-1 flex-wrap">
