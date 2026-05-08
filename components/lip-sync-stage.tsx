@@ -2,7 +2,19 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Users } from 'lucide-react'
-import type { Character, CharacterExpression, CharacterPosition, Layer } from '@/types/db'
+import type { Character, CharacterExpression, Layer, TelopStyle } from '@/types/db'
+import { DEFAULT_TELOP_STYLE } from '@/types/db'
+import { toBandStyle, toTextStyle } from '@/components/telop-settings-dialog'
+
+// 発話しない共演キャラ(静止画で並べる)
+export interface StageExtraCharacter {
+  character: Character
+  expressions: CharacterExpression[]
+  x: number
+  scale: number
+  idleExpressionId: string | null
+  flipped?: boolean
+}
 
 interface LipSyncStageProps {
   character: Character | null
@@ -12,12 +24,35 @@ interface LipSyncStageProps {
   threshold?: number
   playing: boolean
   caption?: string | null
+  telopStyle?: TelopStyle | null
   // 背景レイヤー(order_index 昇順、可視のみ)。キャラ画像の後ろに重ねる。
   backgroundLayers?: Layer[]
-  position?: CharacterPosition
-  scale?: number
+  // 立ち位置 (0..1, 0.5=中央) と縦方向スケール (1.0=ステージ高さいっぱい)
+  characterX?: number
+  characterScale?: number
+  // 左右反転(斜め前向きの立ち絵を逆向きにする)
+  characterFlipped?: boolean
+  // 発話者以外の共演キャラ。 background と main character の間に描画する。
+  extraCharacters?: StageExtraCharacter[]
+  // 音声なしのナレーションで使う表示時間 ms。audioUrl が null かつ playing の間に、
+  // この時間が経過したら onEnded を呼ぶ。
+  silentDurationMs?: number
+  // 再生速度(1=等倍)。音声と無音タイマーの両方に反映。
+  playbackRate?: number
+  // 音声音量 0..1 (既定 1.0)
+  audioVolume?: number
   onEnded?: () => void
   className?: string
+}
+
+function pickIdleImage(extra: StageExtraCharacter): string | null {
+  if (extra.idleExpressionId) {
+    const found = extra.expressions.find((e) => e.id === extra.idleExpressionId)
+    if (found) return found.image_url
+  }
+  const mc = extra.expressions.find((e) => e.kind === 'mouth_closed')
+  if (mc) return mc.image_url
+  return extra.character.image_url
 }
 
 // 音声に合わせて「口開け/口閉じ」画像をパッと切り替えるコンポーネント。
@@ -30,12 +65,68 @@ export function LipSyncStage({
   threshold = 40,
   playing,
   caption,
+  telopStyle,
   backgroundLayers,
-  position = 'center',
-  scale = 1,
+  characterX,
+  characterScale,
+  characterFlipped,
+  extraCharacters,
+  silentDurationMs,
+  playbackRate,
+  audioVolume,
   onEnded,
   className,
 }: LipSyncStageProps) {
+  const rate = typeof playbackRate === 'number' && playbackRate > 0 ? playbackRate : 1
+  const vol = typeof audioVolume === 'number' ? Math.max(0, Math.min(1, audioVolume)) : 1
+  const effectiveStyle = telopStyle ?? DEFAULT_TELOP_STYLE
+  const cx = typeof characterX === 'number' ? characterX : 0.5
+  const cs = typeof characterScale === 'number' ? characterScale : 1.0
+  const flipSx = characterFlipped ? -1 : 1
+
+  // typewriter の段階表示用(intro=typewriter 以外のときは常に全文)
+  const [revealedText, setRevealedText] = useState<string>(caption ?? '')
+  useEffect(() => {
+    if (!caption || !playing) {
+      setRevealedText(caption ?? '')
+      return
+    }
+    if (effectiveStyle.intro !== 'typewriter') {
+      setRevealedText(caption)
+      return
+    }
+    const cps = effectiveStyle.typewriter_cps > 0 ? effectiveStyle.typewriter_cps : 30
+    const start = performance.now()
+    let raf = 0
+    let cancelled = false
+    const tick = (now: number) => {
+      if (cancelled) return
+      const chars = Math.min(caption.length, Math.floor(((now - start) / 1000) * cps))
+      setRevealedText(caption.slice(0, chars))
+      if (chars < caption.length) {
+        raf = requestAnimationFrame(tick)
+      }
+    }
+    setRevealedText('')
+    raf = requestAnimationFrame(tick)
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(raf)
+    }
+  }, [caption, playing, effectiveStyle.intro, effectiveStyle.typewriter_cps])
+
+  const introClass =
+    effectiveStyle.intro === 'pop'
+      ? 'telop-intro-pop'
+      : effectiveStyle.intro === 'fade'
+        ? 'telop-intro-fade'
+        : ''
+  const shakeClass =
+    effectiveStyle.shake === 'subtle'
+      ? 'telop-shake-subtle'
+      : effectiveStyle.shake === 'heavy'
+        ? 'telop-shake-heavy'
+        : ''
   const [mouthOpen, setMouthOpen] = useState(false)
   const [blinking, setBlinking] = useState(false)
 
@@ -116,12 +207,19 @@ export function LipSyncStage({
       audioRef.current?.pause()
       return
     }
-    if (!audioUrl) return
+    if (!audioUrl) {
+      // ナレーション(無音): 指定時間だけ待って onEnded。再生速度で短縮/延長。
+      const ms = (typeof silentDurationMs === 'number' ? silentDurationMs : 3000) / rate
+      const timer = window.setTimeout(() => onEnded?.(), ms)
+      return () => window.clearTimeout(timer)
+    }
     let cancelled = false
     ;(async () => {
       await ensureGraph()
       if (cancelled || !audioRef.current) return
       audioRef.current.currentTime = 0
+      audioRef.current.playbackRate = rate
+      audioRef.current.volume = vol
       try {
         await audioRef.current.play()
         lastTickRef.current = performance.now()
@@ -134,7 +232,7 @@ export function LipSyncStage({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, audioUrl])
+  }, [playing, audioUrl, silentDurationMs, rate, vol])
 
   useEffect(() => {
     return () => {
@@ -199,38 +297,76 @@ export function LipSyncStage({
           style={{ opacity: layer.opacity }}
         />
       ))}
-      {img ? (
-        // 立ち位置 = 横方向のオフセット, scale = サイズ。立ち絵想定で下端 anchor。
-        <div
-          className="absolute inset-y-0 flex items-end justify-center"
-          style={{
-            left: position === 'left' ? '0%' : position === 'right' ? '50%' : '25%',
-            width: '50%',
-          }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
+      {/* 共演キャラ(静止画)は背景の上・発話者の下に描画する */}
+      {extraCharacters?.map((extra) => {
+        const url = pickIdleImage(extra)
+        if (!url) return null
+        const exFlip = extra.flipped ? -1 : 1
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
           <img
-            key={img}
-            src={img}
-            alt={character?.name ?? ''}
-            className="max-h-full max-w-full object-contain"
-            style={{ transform: `scale(${scale})`, transformOrigin: 'bottom center' }}
+            key={extra.character.id}
+            src={url}
+            alt={extra.character.name}
+            className="absolute"
+            style={{
+              bottom: 0,
+              left: `${extra.x * 100}%`,
+              height: `${extra.scale * 100}%`,
+              width: 'auto',
+              maxWidth: 'none',
+              transform: `translateX(-50%) scaleX(${exFlip})`,
+              objectFit: 'contain',
+            }}
           />
-        </div>
-      ) : (
+        )
+      })}
+      {img ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={img}
+          src={img}
+          alt={character?.name ?? ''}
+          className="absolute"
+          style={{
+            bottom: 0,
+            left: `${cx * 100}%`,
+            height: `${cs * 100}%`,
+            width: 'auto',
+            maxWidth: 'none',
+            transform: `translateX(-50%) scaleX(${flipSx})`,
+            objectFit: 'contain',
+          }}
+        />
+      ) : character ? (
+        // キャラは指定されているが画像未登録
         <div className="relative text-center text-muted-foreground p-4">
           <Users size={32} className="mx-auto mb-2" />
           <p className="text-xs">画像を登録してください</p>
         </div>
-      )}
+      ) : null /* ナレーション: 主役枠は空 */}
       {caption && playing && (
-        <div className="absolute inset-x-2 bottom-2 pointer-events-none">
+        <div
+          className="absolute inset-x-2 pointer-events-none"
+          style={{
+            top: effectiveStyle.position === 'top' ? 8 : undefined,
+            bottom: effectiveStyle.position === 'bottom' ? 8 : undefined,
+            ...(effectiveStyle.position === 'center'
+              ? { top: '50%', transform: 'translateY(-50%)' }
+              : {}),
+          }}
+        >
           <div className="mx-auto max-w-[95%] text-center">
             <span
-              className="inline-block px-3 py-1.5 rounded bg-black/70 text-white text-sm md:text-base font-bold leading-tight"
-              style={{ textShadow: '1px 1px 2px rgba(0,0,0,0.9)' }}
+              key={caption /* 新しいセリフに入れ替わったら intro アニメを再実行させる */}
+              className={`inline-block ${introClass}`.trim()}
+              style={toBandStyle(effectiveStyle)}
             >
-              {caption}
+              <span className={shakeClass || undefined}>
+                <span style={{ ...toTextStyle(effectiveStyle), whiteSpace: 'pre-wrap' }}>
+                  {revealedText}
+                </span>
+              </span>
             </span>
           </div>
         </div>

@@ -357,8 +357,10 @@ export function CharacterDialoguesTab({
                       audioUrl={audio?.file_url ?? null}
                       overrideExpressionId={d.expression_id}
                       caption={d.text}
-                      position={d.position ?? 'center'}
-                      scale={d.scale ?? 1}
+                      characterX={
+                        d.position === 'left' ? 0.25 : d.position === 'right' ? 0.75 : 0.5
+                      }
+                      characterScale={d.scale ?? 1}
                       playing={isPlaying}
                       onEnded={() => setPlayingId(null)}
                     />

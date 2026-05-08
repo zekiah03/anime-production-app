@@ -17,6 +17,51 @@ export interface CharacterKnowledge {
   notes: string
 }
 
+// ==================== テロップ(字幕)スタイル ====================
+// 全シーン共通の見た目設定。singleton として settings ストアに保存する。
+
+export type TelopFont = 'gothic' | 'mincho' | 'rounded'
+export type TelopPosition = 'top' | 'center' | 'bottom'
+export type TelopIntro = 'none' | 'pop' | 'typewriter' | 'fade'
+export type TelopShake = 'none' | 'subtle' | 'heavy'
+
+export interface TelopStyle {
+  font: TelopFont
+  size: number // px
+  color: string // '#ffffff'
+  stroke_color: string // '#000000'
+  stroke_width: number // px (0..12)
+  band_color: string // '#000000'
+  band_opacity: number // 0..1
+  position: TelopPosition
+  bold: boolean
+  intro: TelopIntro
+  shake: TelopShake
+  typewriter_cps: number // chars per second for typewriter intro
+}
+
+export const DEFAULT_TELOP_STYLE: TelopStyle = {
+  font: 'gothic',
+  size: 44,
+  color: '#ffffff',
+  stroke_color: '#000000',
+  stroke_width: 6,
+  band_color: '#000000',
+  band_opacity: 0.72,
+  position: 'bottom',
+  bold: true,
+  intro: 'none',
+  shake: 'none',
+  typewriter_cps: 30,
+}
+
+export const TELOP_FONT_FAMILY: Record<TelopFont, string> = {
+  gothic: '"Hiragino Kaku Gothic ProN", "Yu Gothic", "MS Gothic", sans-serif',
+  mincho: '"Hiragino Mincho ProN", "Yu Mincho", "MS Mincho", serif',
+  rounded: '"Kosugi Maru", "Hiragino Maru Gothic ProN", "M PLUS Rounded 1c", sans-serif',
+}
+
+
 export interface Character {
   id: string
   name: string
@@ -59,10 +104,12 @@ export interface Dialogue {
   character_id: string | null
   audio_id: string | null
   expression_id: string | null // プレビュー時の表情指定
-  position: CharacterPosition | null // 立ち位置(null は center 扱い)
-  scale: number | null // 拡大率(null は 1.0 扱い)
+  position?: CharacterPosition | null // 立ち位置(null は center 扱い)
+  scale?: number | null // 拡大率(null は 1.0 扱い)
   emotion: string | null
   notes: string | null
+  // ナレーション(character_id=null)かつ audio なしのときの表示時間 ms。未指定なら 3000。
+  duration_ms?: number | null
   created_at: string
   updated_at: string
 }
@@ -72,9 +119,44 @@ export interface Scene {
   title: string | null
   description: string | null
   background_illustration_id: string | null // 背景に使う環境素材
+  bgm_track_id: string | null // シーン全体に流す BGM
+  bgm_volume: number // 0..1(未指定なら再生側で 0.25 を既定にする)
+  // 所属する動画(未指定なら「未分類」扱い)
+  video_id?: string | null
+  order_index: number
+  // 視覚的グルーピング用のカラータグ(7 色パレット名 or null)
+  color_tag?: SceneColorTag | null
+  created_at: string
+  updated_at: string
+}
+
+// シーンカラータグ: 意味は付けず、視覚的区別だけのために使う
+export type SceneColorTag =
+  | 'red'
+  | 'orange'
+  | 'yellow'
+  | 'green'
+  | 'blue'
+  | 'purple'
+  | 'gray'
+
+// シーンの入れ物。複数本の動画をこのアプリ1つで作り分けるために使う。
+export interface Video {
+  id: string
+  name: string
   order_index: number
   created_at: string
   updated_at: string
+}
+
+// シーンに貼り付けるBGM(音声ファイル)
+export interface BgmTrack {
+  id: string
+  name: string
+  file_url: string // blob URL (derived)
+  file_blob?: Blob // the actual audio data (persisted to IndexedDB)
+  duration: number | null
+  created_at: string
 }
 
 export interface SceneDialogue {
@@ -82,6 +164,31 @@ export interface SceneDialogue {
   scene_id: string
   dialogue_id: string
   order_index: number
+  // 各セリフの冒頭で鳴らす効果音(SE)。未指定ならなし
+  se_id: string | null
+  se_volume: number // 0..1(未指定なら 1.0 を既定にする)
+  // キャラ音声(Dialogue.audio_id)の個別音量 0..1。未指定なら 1.0
+  voice_volume?: number
+  // キャラクターの立ち位置(0..1, 0.5=中央) と スケール(1.0=縦いっぱい)
+  character_x: number
+  character_scale: number
+  // キャラクターの左右反転(斜め前を向いている立ち絵を逆向きにする)
+  character_flipped?: boolean
+  // このセリフを終えてから次に進むまでの追加無音時間 ms(間合い)
+  pause_after_ms?: number
+  // グローバルのテロップ設定を個別セリフで上書きしたい場合に使う(null = 継承)
+  telop_intro?: TelopIntro | null
+  telop_shake?: TelopShake | null
+  created_at: string
+}
+
+// 効果音(ピコッ/ドンッ等の短い oneshot クリップ)
+export interface SoundEffect {
+  id: string
+  name: string
+  file_url: string // blob URL (derived)
+  file_blob?: Blob
+  duration: number | null
   created_at: string
 }
 
@@ -91,6 +198,40 @@ export interface SceneWithDialogues extends Scene {
       dialogue: Dialogue | null
     }
   >
+}
+
+// キャスト配置のプリセット(シーンの 登場キャラ 構成を保存・呼び出し)
+export interface CastPresetMember {
+  character_id: string
+  x: number
+  scale: number
+  idle_expression_id: string | null
+  order_index: number
+  flipped?: boolean
+}
+
+export interface CastPreset {
+  id: string
+  name: string
+  members: CastPresetMember[]
+  created_at: string
+  updated_at: string
+}
+
+// シーンの「登場キャラ」。 speaker 以外は無音で立ち、speaker はリップシンクする。
+export interface SceneCastMember {
+  id: string
+  scene_id: string
+  character_id: string
+  x: number // 0..1, 0.5=中央
+  scale: number // 1.0=縦いっぱい
+  // 喋ってないときに表示する表情 id。未指定なら mouth_closed → メイン画像 の順でフォールバック
+  idle_expression_id: string | null
+  // 描画順(小さいほど奥)
+  order_index: number
+  // 左右反転(斜め前向きの立ち絵を逆向きにする)
+  flipped?: boolean
+  created_at: string
 }
 
 // イラスト(複数レイヤーを持つ1枚の絵)

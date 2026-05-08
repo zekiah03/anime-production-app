@@ -29,7 +29,7 @@ function SyncBadge() {
 
   let icon = <Cloud size={14} className="mt-0.5 flex-shrink-0 text-primary" />
   let label = '同期準備中'
-  let detail = current.name
+  let detail: string = current.name
   let tone = 'bg-primary/10 text-primary'
 
   if (status === 'pending') {

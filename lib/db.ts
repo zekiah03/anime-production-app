@@ -7,21 +7,30 @@ import type {
   Character,
   CharacterExpression,
   AudioFile,
+  BgmTrack,
+  CastPreset,
   Dialogue,
   Scene,
   SceneDialogue,
+  SceneCastMember,
+  SoundEffect,
   Illustration,
   Layer,
+  TelopStyle,
+  Video,
 } from '@/types/db'
+import { DEFAULT_TELOP_STYLE } from '@/types/db'
 
 const DB_NAME = 'anime-production'
-const DB_VERSION = 2
+const DB_VERSION = 8
 
 // 永続化形式 (file_url / image_url は実行時に Blob から生成するので保存しない)
 type StoredCharacter = Omit<Character, 'image_url'> & { image_blob?: Blob }
 type StoredAudioFile = Omit<AudioFile, 'file_url'> & { file_blob: Blob }
 type StoredLayer = Omit<Layer, 'image_url'> & { image_blob: Blob }
 type StoredExpression = Omit<CharacterExpression, 'image_url'> & { image_blob: Blob }
+type StoredBgmTrack = Omit<BgmTrack, 'file_url'> & { file_blob: Blob }
+type StoredSoundEffect = Omit<SoundEffect, 'file_url'> & { file_blob: Blob }
 
 interface AnimeDB extends DBSchema {
   characters: { key: string; value: StoredCharacter }
@@ -52,6 +61,23 @@ interface AnimeDB extends DBSchema {
     value: StoredLayer
     indexes: { by_illustration: string }
   }
+  bgm_tracks: { key: string; value: StoredBgmTrack }
+  sound_effects: { key: string; value: StoredSoundEffect }
+  // settings: id をキーにした singleton。'telop' / 'ai' など設定ごとにレコードを分ける
+  settings: {
+    key: string
+    value: { id: 'telop'; telop_style?: TelopStyle }
+  }
+  // シーンの登場キャラ(複数キャラを同時配置)
+  scene_cast: {
+    key: string
+    value: SceneCastMember
+    indexes: { by_scene: string; by_character: string }
+  }
+  // 動画(シーンの入れ物)
+  videos: { key: string; value: Video }
+  // キャスト配置プリセット(シーンの登場キャラ構成を使い回す)
+  cast_presets: { key: string; value: CastPreset }
 }
 
 let dbPromise: Promise<IDBPDatabase<AnimeDB>> | null = null
@@ -92,6 +118,26 @@ function getDB() {
         if (!db.objectStoreNames.contains('character_expressions')) {
           const store = db.createObjectStore('character_expressions', { keyPath: 'id' })
           store.createIndex('by_character', 'character_id')
+        }
+        if (!db.objectStoreNames.contains('bgm_tracks')) {
+          db.createObjectStore('bgm_tracks', { keyPath: 'id' })
+        }
+        if (!db.objectStoreNames.contains('sound_effects')) {
+          db.createObjectStore('sound_effects', { keyPath: 'id' })
+        }
+        if (!db.objectStoreNames.contains('settings')) {
+          db.createObjectStore('settings', { keyPath: 'id' })
+        }
+        if (!db.objectStoreNames.contains('scene_cast')) {
+          const store = db.createObjectStore('scene_cast', { keyPath: 'id' })
+          store.createIndex('by_scene', 'scene_id')
+          store.createIndex('by_character', 'character_id')
+        }
+        if (!db.objectStoreNames.contains('videos')) {
+          db.createObjectStore('videos', { keyPath: 'id' })
+        }
+        if (!db.objectStoreNames.contains('cast_presets')) {
+          db.createObjectStore('cast_presets', { keyPath: 'id' })
         }
       },
     })
@@ -150,9 +196,9 @@ export async function saveCharacter(character: Character): Promise<void> {
 
 export async function deleteCharacter(id: string): Promise<void> {
   const db = await getDB()
-  // 関連する audio_files / dialogues の character_id を null にする / expressions は削除
+  // 関連する audio_files / dialogues の character_id を null / expressions と scene_cast は削除
   const tx = db.transaction(
-    ['characters', 'audio_files', 'dialogues', 'character_expressions'],
+    ['characters', 'audio_files', 'dialogues', 'character_expressions', 'scene_cast'],
     'readwrite',
   )
   await tx.objectStore('characters').delete(id)
@@ -167,6 +213,10 @@ export async function deleteCharacter(id: string): Promise<void> {
   }
   const exprIndex = tx.objectStore('character_expressions').index('by_character')
   for await (const cursor of exprIndex.iterate(id)) {
+    await cursor.delete()
+  }
+  const castIndex = tx.objectStore('scene_cast').index('by_character')
+  for await (const cursor of castIndex.iterate(id)) {
     await cursor.delete()
   }
   await tx.done
@@ -309,12 +359,16 @@ export async function saveScenesBatch(scenes: Scene[]): Promise<void> {
 
 export async function deleteScene(id: string): Promise<void> {
   const db = await getDB()
-  // 関連する scene_dialogues も削除
-  const tx = db.transaction(['scenes', 'scene_dialogues'], 'readwrite')
+  // 関連する scene_dialogues / scene_cast も削除
+  const tx = db.transaction(['scenes', 'scene_dialogues', 'scene_cast'], 'readwrite')
   await tx.objectStore('scenes').delete(id)
 
   const sdIndex = tx.objectStore('scene_dialogues').index('by_scene')
   for await (const cursor of sdIndex.iterate(id)) {
+    await cursor.delete()
+  }
+  const castIndex = tx.objectStore('scene_cast').index('by_scene')
+  for await (const cursor of castIndex.iterate(id)) {
     await cursor.delete()
   }
   await tx.done
@@ -412,6 +466,214 @@ export async function deleteLayer(id: string): Promise<void> {
   const db = await getDB()
   await db.delete('layers', id)
   notifyChange()
+}
+
+// ==================== BGM Tracks ====================
+
+function hydrateBgm(stored: StoredBgmTrack): BgmTrack {
+  return {
+    ...stored,
+    file_url: URL.createObjectURL(stored.file_blob),
+  }
+}
+
+export async function getAllBgmTracks(): Promise<BgmTrack[]> {
+  const db = await getDB()
+  const all = await db.getAll('bgm_tracks')
+  return all
+    .map(hydrateBgm)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+}
+
+export async function saveBgmTrack(track: BgmTrack): Promise<void> {
+  if (!track.file_blob) throw new Error('file_blob is required')
+  const db = await getDB()
+  const { file_url: _file_url, ...rest } = track
+  void _file_url
+  await db.put('bgm_tracks', { ...rest, file_blob: track.file_blob })
+  notifyChange()
+}
+
+export async function deleteBgmTrack(id: string): Promise<void> {
+  const db = await getDB()
+  // 関連する scenes の bgm_track_id を null にする
+  const tx = db.transaction(['bgm_tracks', 'scenes'], 'readwrite')
+  await tx.objectStore('bgm_tracks').delete(id)
+
+  for await (const cursor of tx.objectStore('scenes').iterate()) {
+    if (cursor.value.bgm_track_id === id) {
+      await cursor.update({ ...cursor.value, bgm_track_id: null })
+    }
+  }
+  await tx.done
+  notifyChange()
+}
+
+// ==================== Sound Effects ====================
+
+function hydrateSe(stored: StoredSoundEffect): SoundEffect {
+  return {
+    ...stored,
+    file_url: URL.createObjectURL(stored.file_blob),
+  }
+}
+
+export async function getAllSoundEffects(): Promise<SoundEffect[]> {
+  const db = await getDB()
+  const all = await db.getAll('sound_effects')
+  return all
+    .map(hydrateSe)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+}
+
+export async function saveSoundEffect(se: SoundEffect): Promise<void> {
+  if (!se.file_blob) throw new Error('file_blob is required')
+  const db = await getDB()
+  const { file_url: _file_url, ...rest } = se
+  void _file_url
+  await db.put('sound_effects', { ...rest, file_blob: se.file_blob })
+  notifyChange()
+}
+
+export async function deleteSoundEffect(id: string): Promise<void> {
+  const db = await getDB()
+  // 関連する scene_dialogues の se_id を null にする
+  const tx = db.transaction(['sound_effects', 'scene_dialogues'], 'readwrite')
+  await tx.objectStore('sound_effects').delete(id)
+
+  for await (const cursor of tx.objectStore('scene_dialogues').iterate()) {
+    if (cursor.value.se_id === id) {
+      await cursor.update({ ...cursor.value, se_id: null })
+    }
+  }
+  await tx.done
+  notifyChange()
+}
+
+// ==================== Cast Presets ====================
+
+export async function getAllCastPresets(): Promise<CastPreset[]> {
+  const db = await getDB()
+  const all = await db.getAll('cast_presets')
+  return all.sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+}
+
+export async function saveCastPreset(preset: CastPreset): Promise<void> {
+  const db = await getDB()
+  await db.put('cast_presets', preset)
+  notifyChange()
+}
+
+export async function deleteCastPreset(id: string): Promise<void> {
+  const db = await getDB()
+  await db.delete('cast_presets', id)
+  notifyChange()
+}
+
+// ==================== Videos(シーンの入れ物) ====================
+
+export async function getAllVideos(): Promise<Video[]> {
+  const db = await getDB()
+  const all = await db.getAll('videos')
+  return all.sort((a, b) => a.order_index - b.order_index)
+}
+
+export async function saveVideo(video: Video): Promise<void> {
+  const db = await getDB()
+  await db.put('videos', video)
+  notifyChange()
+}
+
+export async function deleteVideo(id: string): Promise<void> {
+  const db = await getDB()
+  // その動画に属していたシーンは未分類(video_id=null)に外す
+  const tx = db.transaction(['videos', 'scenes'], 'readwrite')
+  await tx.objectStore('videos').delete(id)
+  for await (const cursor of tx.objectStore('scenes').iterate()) {
+    if (cursor.value.video_id === id) {
+      await cursor.update({ ...cursor.value, video_id: null })
+    }
+  }
+  await tx.done
+  notifyChange()
+}
+
+// ==================== Scene Cast ====================
+
+export async function getAllSceneCast(): Promise<SceneCastMember[]> {
+  const db = await getDB()
+  return db.getAll('scene_cast')
+}
+
+export async function getSceneCast(sceneId: string): Promise<SceneCastMember[]> {
+  const db = await getDB()
+  const all = await db.getAllFromIndex('scene_cast', 'by_scene', sceneId)
+  return all.sort((a, b) => a.order_index - b.order_index)
+}
+
+export async function saveSceneCastMember(member: SceneCastMember): Promise<void> {
+  const db = await getDB()
+  await db.put('scene_cast', member)
+  notifyChange()
+}
+
+export async function deleteSceneCastMember(id: string): Promise<void> {
+  const db = await getDB()
+  await db.delete('scene_cast', id)
+  notifyChange()
+}
+
+// ==================== Settings (singleton) ====================
+
+export async function getTelopStyle(): Promise<TelopStyle> {
+  const db = await getDB()
+  const row = await db.get('settings', 'telop')
+  return row?.telop_style ?? DEFAULT_TELOP_STYLE
+}
+
+export async function saveTelopStyle(style: TelopStyle): Promise<void> {
+  const db = await getDB()
+  await db.put('settings', { id: 'telop', telop_style: style })
+  notifyChange()
+}
+
+// ==================== Raw access (for export/import) ====================
+
+// プロジェクト書き出し/読み込みのために生データにアクセスするヘルパー。
+// 通常の getAll*() は URL を hydrate するため、エクスポートには不向き(URL は実行時にしか意味がない)。
+
+export const STORE_NAMES = [
+  'characters',
+  'character_expressions',
+  'audio_files',
+  'dialogues',
+  'scenes',
+  'scene_dialogues',
+  'illustrations',
+  'layers',
+  'bgm_tracks',
+  'sound_effects',
+  'scene_cast',
+  'settings',
+] as const
+
+export type StoreName = (typeof STORE_NAMES)[number]
+
+export async function getAllRaw(storeName: StoreName): Promise<unknown[]> {
+  const db = await getDB()
+  // idb の厳密な型付けはストアごとに異なる value を要求するが、
+  // 汎用アクセスなので as never で bypass する。
+  return db.getAll(storeName as never)
+}
+
+export async function clearStore(storeName: StoreName): Promise<void> {
+  const db = await getDB()
+  await db.clear(storeName as never)
+}
+
+export async function putRaw(storeName: StoreName, item: unknown): Promise<void> {
+  const db = await getDB()
+  await db.put(storeName as never, item as never)
 }
 
 // ==================== Counts (for dashboard) ====================
