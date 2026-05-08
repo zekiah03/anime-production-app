@@ -8,10 +8,11 @@ import type {
   CharacterExpression,
   CharacterMotion,
   Layer,
+  SceneColorFilter,
   ScreenEffect,
   TelopStyle,
 } from '@/types/db'
-import { DEFAULT_TELOP_STYLE } from '@/types/db'
+import { COLOR_FILTER_CSS, DEFAULT_TELOP_STYLE } from '@/types/db'
 import { toBandStyle, toTextStyle } from '@/components/telop-settings-dialog'
 import { EffectOverlay } from '@/components/effect-overlay'
 
@@ -97,6 +98,8 @@ interface LipSyncStageProps {
   effect?: ScreenEffect | null
   // シーン全体のカメラワーク(背景+キャラ全部にかかる)
   cameraMotion?: CameraMotion | null
+  // 色調フィルター(回想・夜など)
+  colorFilter?: SceneColorFilter | null
   onEnded?: () => void
   className?: string
 }
@@ -133,11 +136,14 @@ export function LipSyncStage({
   motion,
   effect,
   cameraMotion,
+  colorFilter,
   onEnded,
   className,
 }: LipSyncStageProps) {
   const cameraClass =
     cameraMotion && cameraMotion !== 'none' ? CAMERA_CLASS[cameraMotion] : ''
+  const filterCss =
+    colorFilter && colorFilter !== 'none' ? COLOR_FILTER_CSS[colorFilter] : 'none'
   const rate = typeof playbackRate === 'number' && playbackRate > 0 ? playbackRate : 1
   const vol = typeof audioVolume === 'number' ? Math.max(0, Math.min(1, audioVolume)) : 1
   const effectiveStyle = telopStyle ?? DEFAULT_TELOP_STYLE
@@ -366,6 +372,7 @@ export function LipSyncStage({
       <div
         key={`cam-${cameraMotion ?? 'none'}`}
         className={`absolute inset-0 ${cameraClass}`}
+        style={{ filter: filterCss }}
       >
       {backgroundLayers?.map((layer) => (
         // eslint-disable-next-line @next/next/no-img-element

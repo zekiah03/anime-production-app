@@ -60,6 +60,7 @@ import type {
   Layer,
   Scene,
   SceneCastMember,
+  SceneColorFilter,
   SceneColorTag,
   SceneDialogue,
   SceneTransition,
@@ -608,6 +609,7 @@ export default function SceneEditorPage({
                   motion={previewSd?.motion ?? null}
                   effect={previewSd?.effect ?? null}
                   cameraMotion={scene?.camera_motion ?? null}
+                  colorFilter={scene?.color_filter ?? null}
                   playing={previewIdx !== null}
                   onEnded={() => {
                     setPreviewIdx((idx) => {
@@ -799,6 +801,28 @@ export default function SceneEditorPage({
               >
                 <option value="cut">即切替</option>
                 <option value="fade">黒フェード</option>
+              </select>
+            </div>
+            <div>
+              <p className="text-[10px] font-medium text-muted-foreground mb-1">
+                色調フィルター
+              </p>
+              <select
+                value={scene.color_filter ?? 'none'}
+                onChange={(e) =>
+                  persistScene({
+                    color_filter: (e.target.value as SceneColorFilter) || 'none',
+                  })
+                }
+                className="w-full px-2 py-1.5 bg-background border border-input rounded text-sm text-foreground"
+                title="背景・キャラに適用する色調(テロップは影響しない)"
+              >
+                <option value="none">そのまま</option>
+                <option value="sepia">セピア(回想)</option>
+                <option value="cool">寒色(夜・冷静)</option>
+                <option value="warm">暖色(夕暮れ)</option>
+                <option value="monochrome">モノクロ(ドラマ)</option>
+                <option value="invert">反転(ホラー)</option>
               </select>
             </div>
             <div>

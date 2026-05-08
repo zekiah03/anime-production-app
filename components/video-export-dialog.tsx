@@ -20,12 +20,14 @@ import type {
   IllustrationWithLayers,
   Layer,
   SceneCastMember,
+  SceneColorFilter,
   SceneWithDialogues,
   ScreenEffect,
   SoundEffect,
   TelopShake,
   TelopStyle,
 } from '@/types/db'
+import { COLOR_FILTER_CSS } from '@/types/db'
 import { DEFAULT_TELOP_STYLE, TELOP_FONT_FAMILY } from '@/types/db'
 import { hexToRgba } from '@/components/telop-settings-dialog'
 
@@ -590,12 +592,17 @@ export function VideoExportDialog({
     cameraMotion: CameraMotion | null,
     sceneElapsedMs: number,
     titleCardText: string | null,
+    colorFilter: SceneColorFilter | null,
   ) {
     ctx.fillStyle = '#111111'
     ctx.fillRect(0, 0, WIDTH, HEIGHT)
 
-    // ここから先はカメラの transform 配下(背景〜エフェクト)。テロップは外に置く。
+    // ここから先はカメラの transform + 色調フィルター配下(背景〜エフェクト)。
+    // テロップは外に置くので filter / transform からは外れる。
     ctx.save()
+    if (colorFilter && colorFilter !== 'none') {
+      ctx.filter = COLOR_FILTER_CSS[colorFilter]
+    }
     applyCamera(ctx, cameraMotion, sceneElapsedMs, WIDTH, HEIGHT)
 
     // 背景
@@ -1061,6 +1068,7 @@ export function VideoExportDialog({
                 sceneCameraMotion,
                 now - sceneStartAt,
                 seg.scene.title_card_text ?? null,
+                seg.scene.color_filter ?? null,
               )
               raf = requestAnimationFrame(tick)
             }
@@ -1103,6 +1111,7 @@ export function VideoExportDialog({
                   sceneCameraMotion,
                   now - sceneStartAt,
                   seg.scene.title_card_text ?? null,
+                  seg.scene.color_filter ?? null,
                 )
                 r = requestAnimationFrame(tick)
               }

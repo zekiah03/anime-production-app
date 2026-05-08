@@ -131,6 +131,28 @@ export type CameraMotion =
 // cut: 即切替 / fade: 黒フェードアウト→次シーンへ黒フェードイン
 export type SceneTransition = 'cut' | 'fade'
 
+// シーンに適用する色調フィルター(背景・キャラ・エフェクト全部にかかる)
+// none: そのまま / sepia: 回想 / cool: 夜・寒色 / warm: 夕暮れ・温かい
+// monochrome: ドラマチック / invert: ホラー風
+export type SceneColorFilter =
+  | 'none'
+  | 'sepia'
+  | 'cool'
+  | 'warm'
+  | 'monochrome'
+  | 'invert'
+
+// CSS / canvas 共通の filter 文字列。テロップは外しているので、ここではキャラと
+// 背景にだけかかる前提で値を選んでいる。
+export const COLOR_FILTER_CSS: Record<SceneColorFilter, string> = {
+  none: 'none',
+  sepia: 'sepia(0.6) saturate(1.1) hue-rotate(-10deg)',
+  cool: 'saturate(0.85) hue-rotate(180deg) brightness(0.9)',
+  warm: 'saturate(1.15) hue-rotate(-25deg) brightness(1.05)',
+  monochrome: 'grayscale(1) contrast(1.1)',
+  invert: 'invert(1) hue-rotate(180deg)',
+}
+
 export interface Scene {
   id: string
   title: string | null
@@ -149,6 +171,8 @@ export interface Scene {
   transition_in?: SceneTransition | null
   // シーン冒頭 ~2.5s 大見出しで表示するテキスト(章タイトル等)。null なら表示なし。
   title_card_text?: string | null
+  // 色調フィルター(回想・夜など)
+  color_filter?: SceneColorFilter | null
   created_at: string
   updated_at: string
 }
