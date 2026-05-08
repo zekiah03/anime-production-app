@@ -9,8 +9,9 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { Loader2 } from 'lucide-react'
 import { onDBChange } from '@/lib/db'
-import { updateProjectInCloud } from '@/lib/cloud-sync'
+import { loadProjectFromCloud, updateProjectInCloud } from '@/lib/cloud-sync'
 
 const STORAGE_KEY = 'anime-app:current-cloud-project'
 const DEBOUNCE_MS = 3000
@@ -29,6 +30,8 @@ interface AutoSyncContextValue {
   lastSavedAt: string | null
   errorMessage: string | null
   syncNow: () => Promise<void>
+  // 端末を切替えても同じデータで開けるよう、起動時にクラウドから読み込み中かどうか
+  initialLoading: boolean
 }
 
 const AutoSyncContext = createContext<AutoSyncContextValue | null>(null)
@@ -66,17 +69,61 @@ export function AutoSyncProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<SyncStatus>('idle')
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [loadProgress, setLoadProgress] = useState<string>('クラウドから同期中...')
 
   const timerRef = useRef<number | null>(null)
   const inFlightRef = useRef(false)
   const pendingRef = useRef(false)
   const currentRef = useRef<CurrentProject | null>(null)
+  // クラウドから読込中は IDB への書き込みが大量に走るので、
+  // その間は auto-sync を抑制する(自分の書き込みで自分のクラウドを上書きしないため)
+  const suppressSyncRef = useRef(false)
 
-  // 初回マウント時に localStorage から復元
+  // 初回マウント時に localStorage から復元 + クラウドから自動読込
   useEffect(() => {
+    let cancelled = false
     const stored = loadCurrent()
     setCurrentState(stored)
     currentRef.current = stored
+    if (!stored) {
+      setInitialLoading(false)
+      return
+    }
+    // 既存プロジェクトがある: クラウド最新を取りに行って上書きロード。
+    // 同セッション内で何度も読み込まないよう sessionStorage で 1 回だけに絞る。
+    const RELOAD_FLAG = 'anime-app:initial-load-done'
+    if (sessionStorage.getItem(RELOAD_FLAG) === '1') {
+      // 既に読み込み済み → そのまま起動
+      setInitialLoading(false)
+      return
+    }
+    setLoadProgress(`「${stored.name}」をクラウドから読み込み中...`)
+    suppressSyncRef.current = true
+    ;(async () => {
+      try {
+        await loadProjectFromCloud(stored.id)
+        sessionStorage.setItem(RELOAD_FLAG, '1')
+        // ロード後はコンポーネントが既に古い state で動いているので、ページを再読込して
+        // 全体を新しい IDB 状態で初期化する。再読込中も RELOAD_FLAG は session 内で生存する。
+        if (!cancelled) {
+          window.location.reload()
+        }
+      } catch (e) {
+        console.warn('[anime-app] initial cloud load failed', e)
+        setErrorMessage(
+          (e as Error).message + ' — ローカルデータで起動します',
+        )
+        if (!cancelled) {
+          suppressSyncRef.current = false
+          setInitialLoading(false)
+          setStatus('error')
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const setCurrent = useCallback((next: CurrentProject | null) => {
@@ -119,6 +166,7 @@ export function AutoSyncProvider({ children }: { children: ReactNode }) {
 
   const scheduleSync = useCallback(() => {
     if (!currentRef.current) return
+    if (suppressSyncRef.current) return
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current)
     }
@@ -133,6 +181,7 @@ export function AutoSyncProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsubscribe = onDBChange(() => {
       if (!currentRef.current) return // クラウドに紐付いてない場合は何もしない
+      if (suppressSyncRef.current) return // 起動時のクラウド読込中は無視
       scheduleSync()
     })
     return unsubscribe
@@ -162,7 +211,23 @@ export function AutoSyncProvider({ children }: { children: ReactNode }) {
     lastSavedAt,
     errorMessage,
     syncNow,
+    initialLoading,
   }
 
-  return <AutoSyncContext.Provider value={value}>{children}</AutoSyncContext.Provider>
+  return (
+    <AutoSyncContext.Provider value={value}>
+      {initialLoading && current && (
+        // クラウド読込中のフルスクリーン オーバーレイ。子コンポーネントは既に
+        // マウントされていて IDB アクセスを試みるので、視覚的に隠して操作を防ぐ。
+        <div className="fixed inset-0 z-[9999] bg-background/95 flex flex-col items-center justify-center gap-3">
+          <Loader2 size={32} className="animate-spin text-primary" />
+          <p className="text-sm text-foreground font-medium">{loadProgress}</p>
+          <p className="text-xs text-muted-foreground">
+            別端末で編集された最新の状態を取得しています
+          </p>
+        </div>
+      )}
+      {children}
+    </AutoSyncContext.Provider>
+  )
 }
