@@ -20,7 +20,7 @@ import { SceneCardSkeleton } from '@/components/skeleton'
 import { resetFirstTimeTour } from '@/components/first-time-tour'
 import { SCENE_COLORS, sceneColorFor } from '@/lib/scene-colors'
 import { charColorHsl } from '@/lib/char-color'
-import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset, SceneColorTag } from '@/types/db'
+import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, CharacterMotion, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset, SceneColorTag } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
   clearStore,
@@ -1631,6 +1631,7 @@ export default function StoryboardPage() {
         | 'pause_after_ms'
         | 'telop_intro'
         | 'telop_shake'
+        | 'motion'
       >
     >,
   ) {
@@ -1662,6 +1663,7 @@ export default function StoryboardPage() {
                 typeof rowPart.pause_after_ms === 'number' ? rowPart.pause_after_ms : 0,
               telop_intro: rowPart.telop_intro ?? null,
               telop_shake: rowPart.telop_shake ?? null,
+              motion: rowPart.motion ?? null,
               created_at: rowPart.created_at,
             }
             saveSceneDialogue(row).catch((e) =>
@@ -3815,6 +3817,32 @@ export default function StoryboardPage() {
                                             <option value="heavy">強</option>
                                           </select>
                                         </div>
+                                        {/* キャラの動き(セリフ冒頭で発火するアニメーション) */}
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-xs text-muted-foreground flex-shrink-0">
+                                            動き
+                                          </span>
+                                          <select
+                                            value={sd.motion ?? 'none'}
+                                            onChange={(e) =>
+                                              updateSceneDialogueMeta(scene.id, sd.id, {
+                                                motion:
+                                                  (e.target.value as CharacterMotion) || 'none',
+                                              })
+                                            }
+                                            className="px-2 py-0.5 bg-card border border-input rounded text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                                            title="セリフ冒頭でキャラに付ける動き"
+                                          >
+                                            <option value="none">なし</option>
+                                            <option value="shake">震える</option>
+                                            <option value="jump">ジャンプ</option>
+                                            <option value="pop_in">ポップイン</option>
+                                            <option value="slide_in_left">左からスライド</option>
+                                            <option value="slide_in_right">右からスライド</option>
+                                            <option value="fade_in">フェードイン</option>
+                                            <option value="zoom_in">拡大して登場</option>
+                                          </select>
+                                        </div>
                                       </div>
                                     )
                                   })}
@@ -5066,6 +5094,8 @@ interface SceneDialogueResolved {
   pauseAfterMs: number
   // テロップの個別上書き(null ならグローバル設定)
   telopStyleForThis: TelopStyle
+  // セリフ冒頭で発火するキャラの動き
+  motion: CharacterMotion | null
 }
 
 interface StageExtraResolved {
@@ -5227,6 +5257,7 @@ function ScenePlayerDialog({
         silentDurationMs,
         pauseAfterMs,
         telopStyleForThis,
+        motion: sd.motion ?? null,
       } satisfies SceneDialogueResolved
     })
     // 採用ルール: (キャラ+音声) or (テキストあり= ナレーション)
@@ -5348,6 +5379,7 @@ function ScenePlayerDialog({
                 silentDurationMs={current?.silentDurationMs ?? 3000}
                 playbackRate={playbackRate}
                 audioVolume={current?.voiceVolume ?? 1}
+                motion={current?.motion ?? null}
                 playing={playing}
                 onEnded={handleEnded}
               />

@@ -541,6 +541,7 @@ export default function SceneEditorPage({
                   extraCharacters={extras}
                   silentDurationMs={previewSd?.dialogue?.duration_ms ?? 3000}
                   audioVolume={previewSd?.voice_volume ?? 1}
+                  motion={previewSd?.motion ?? null}
                   playing={previewIdx !== null}
                   onEnded={() => {
                     setPreviewIdx((idx) => {
