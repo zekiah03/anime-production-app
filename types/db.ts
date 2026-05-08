@@ -147,6 +147,8 @@ export interface Scene {
   camera_motion?: CameraMotion | null
   // このシーンの冒頭で適用するつなぎ(前シーンの末尾と一緒に黒フェードする)
   transition_in?: SceneTransition | null
+  // シーン冒頭 ~2.5s 大見出しで表示するテキスト(章タイトル等)。null なら表示なし。
+  title_card_text?: string | null
   created_at: string
   updated_at: string
 }

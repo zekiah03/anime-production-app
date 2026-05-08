@@ -589,6 +589,7 @@ export function VideoExportDialog({
     elapsedMs: number,
     cameraMotion: CameraMotion | null,
     sceneElapsedMs: number,
+    titleCardText: string | null,
   ) {
     ctx.fillStyle = '#111111'
     ctx.fillRect(0, 0, WIDTH, HEIGHT)
@@ -744,6 +745,35 @@ export function VideoExportDialog({
 
         ctx.restore()
       }
+    }
+
+    // タイトルカード(シーン冒頭の大見出し): 0..2500ms で fade in→hold→fade out
+    if (titleCardText && sceneElapsedMs < 2500) {
+      const TC_DUR = 2500
+      const FADE_IN = 300
+      const FADE_OUT = 300
+      let alpha = 1
+      if (sceneElapsedMs < FADE_IN) {
+        alpha = sceneElapsedMs / FADE_IN
+      } else if (sceneElapsedMs > TC_DUR - FADE_OUT) {
+        alpha = (TC_DUR - sceneElapsedMs) / FADE_OUT
+      }
+      alpha = Math.max(0, Math.min(1, alpha))
+      ctx.save()
+      // 半透明黒の全画面マスク(タイトルが浮き上がるよう少し落とす)
+      ctx.fillStyle = `rgba(0,0,0,${0.45 * alpha})`
+      ctx.fillRect(0, 0, WIDTH, HEIGHT)
+      // 大見出し
+      const fontSize = Math.round(WIDTH * 0.085)
+      ctx.font = `bold ${fontSize}px "Hiragino Mincho ProN", "Yu Mincho", "MS Mincho", serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.lineWidth = Math.max(4, fontSize * 0.12)
+      ctx.strokeStyle = `rgba(0,0,0,${alpha})`
+      ctx.fillStyle = `rgba(255,255,255,${alpha})`
+      ctx.strokeText(titleCardText, WIDTH / 2, HEIGHT / 2)
+      ctx.fillText(titleCardText, WIDTH / 2, HEIGHT / 2)
+      ctx.restore()
     }
   }
 
@@ -1030,6 +1060,7 @@ export function VideoExportDialog({
                 now - startAt,
                 sceneCameraMotion,
                 now - sceneStartAt,
+                seg.scene.title_card_text ?? null,
               )
               raf = requestAnimationFrame(tick)
             }
@@ -1071,6 +1102,7 @@ export function VideoExportDialog({
                   current.silentDurationMs + 99999,
                   sceneCameraMotion,
                   now - sceneStartAt,
+                  seg.scene.title_card_text ?? null,
                 )
                 r = requestAnimationFrame(tick)
               }

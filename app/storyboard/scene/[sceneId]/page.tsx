@@ -802,6 +802,22 @@ export default function SceneEditorPage({
               </select>
             </div>
             <div>
+              <p className="text-[10px] font-medium text-muted-foreground mb-1">
+                タイトルカード(動画書き出し時のみ)
+              </p>
+              <Input
+                value={scene.title_card_text ?? ''}
+                onChange={(e) =>
+                  persistScene({ title_card_text: e.target.value || null })
+                }
+                placeholder="第一話 出会い"
+                className="bg-background border-input"
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                空欄でなしになります。動画冒頭の 2.5 秒、大見出しで表示
+              </p>
+            </div>
+            <div>
               <p className="text-[10px] font-medium text-muted-foreground mb-1">BGM</p>
               <select
                 value={scene.bgm_track_id ?? ''}
