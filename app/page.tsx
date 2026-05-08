@@ -9,6 +9,7 @@ import type { Character } from '@/types/db'
 import { getAllCharacters, getCounts } from '@/lib/db'
 import { Sidebar } from '@/components/sidebar'
 import { CloudSyncDialog } from '@/components/cloud-sync-dialog'
+import { ProgressDashboard } from '@/components/progress-dashboard'
 import {
   exportProject,
   importProject,
@@ -223,6 +224,10 @@ export default function Dashboard() {
                   )}
                 </div>
               </Card>
+
+              <div className="mt-6">
+                <ProgressDashboard />
+              </div>
             </div>
 
             <div>
