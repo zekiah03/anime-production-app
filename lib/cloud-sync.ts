@@ -54,7 +54,21 @@ async function uploadBlob(blob: Blob, path: string, contentType?: string): Promi
   const { error } = await supabase.storage
     .from(STORAGE_BUCKET)
     .upload(path, blob, { upsert: true, contentType })
-  if (error) throw new Error(`Storage upload failed (${path}): ${error.message}`)
+  if (error) {
+    // Storage の代表的なエラーをユーザーに分かるメッセージに翻訳。
+    const msg = error.message ?? ''
+    if (/Bucket not found/i.test(msg)) {
+      throw new Error(
+        `Supabase Storage に "${STORAGE_BUCKET}" バケットが存在しません。Supabase ダッシュボード → Storage で「${STORAGE_BUCKET}」を Public で作成してください`,
+      )
+    }
+    if (/row-level security|policy/i.test(msg)) {
+      throw new Error(
+        `Storage の RLS ポリシーで弾かれています。Supabase の SQL Editor で次を実行してください:\ncreate policy "anime-assets full access" on storage.objects for all to anon, authenticated using (bucket_id = '${STORAGE_BUCKET}') with check (bucket_id = '${STORAGE_BUCKET}');`,
+      )
+    }
+    throw new Error(`Storage upload failed (${path}): ${msg}`)
+  }
   const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path)
   return data.publicUrl
 }
