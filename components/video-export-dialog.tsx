@@ -758,11 +758,53 @@ export function VideoExportDialog({
       setStatus('recording')
 
       let globalIdx = 0
+      let segIdx = -1
 
       // シーン単位で BGM と背景を切り替えながらセリフを再生
       for (const seg of validSegments) {
         if (cancelledRef.current) break
+        segIdx++
         setCurrentSceneLabel(`#${globalIdx + 1} ${seg.scene.title ?? ''}`)
+
+        // シーン頭のフェード: 前シーン末尾フレームを保存しておき、それを下敷きに
+        // 黒のアルファを 0→1 まで上げていく。短時間(280ms)の黒フェード。
+        if (segIdx > 0 && (seg.scene.transition_in ?? 'cut') === 'fade') {
+          let snapshot: ImageData | null = null
+          try {
+            snapshot = ctx.getImageData(0, 0, WIDTH, HEIGHT)
+          } catch (e) {
+            // tainted canvas 等で失敗したら諦めて黒一発
+            console.warn('[anime-app] fade snapshot failed', e)
+          }
+          const FADE_MS = 280
+          const fadeStart = performance.now()
+          await new Promise<void>((resolve) => {
+            const tick = () => {
+              if (cancelledRef.current) {
+                resolve()
+                return
+              }
+              const elapsed = performance.now() - fadeStart
+              if (elapsed >= FADE_MS) {
+                ctx.fillStyle = '#000'
+                ctx.fillRect(0, 0, WIDTH, HEIGHT)
+                resolve()
+                return
+              }
+              const t = elapsed / FADE_MS
+              if (snapshot) {
+                ctx.putImageData(snapshot, 0, 0)
+                ctx.fillStyle = `rgba(0,0,0,${t})`
+                ctx.fillRect(0, 0, WIDTH, HEIGHT)
+              } else {
+                ctx.fillStyle = '#000'
+                ctx.fillRect(0, 0, WIDTH, HEIGHT)
+              }
+              requestAnimationFrame(tick)
+            }
+            requestAnimationFrame(tick)
+          })
+        }
 
         // BGM: シーンに入ったときに起動、シーン終了時に停止
         let bgmEl: HTMLAudioElement | null = null

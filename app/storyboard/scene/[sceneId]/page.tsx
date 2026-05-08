@@ -62,6 +62,7 @@ import type {
   SceneCastMember,
   SceneColorTag,
   SceneDialogue,
+  SceneTransition,
   SoundEffect,
   TelopStyle,
   Video,
@@ -780,6 +781,24 @@ export default function SceneEditorPage({
                 <option value="pan_left">左へパン</option>
                 <option value="shake_subtle">微振動(緊張)</option>
                 <option value="shake_heavy">強振動(衝撃)</option>
+              </select>
+            </div>
+            <div>
+              <p className="text-[10px] font-medium text-muted-foreground mb-1">
+                シーン頭のつなぎ
+              </p>
+              <select
+                value={scene.transition_in ?? 'cut'}
+                onChange={(e) =>
+                  persistScene({
+                    transition_in: (e.target.value as SceneTransition) || 'cut',
+                  })
+                }
+                className="w-full px-2 py-1.5 bg-background border border-input rounded text-sm text-foreground"
+                title="動画書き出し時、前のシーンからこのシーンに切り替わる演出"
+              >
+                <option value="cut">即切替</option>
+                <option value="fade">黒フェード</option>
               </select>
             </div>
             <div>

@@ -127,6 +127,10 @@ export type CameraMotion =
   | 'shake_subtle'
   | 'shake_heavy'
 
+// シーン間のつなぎ方(動画書き出し時に適用)
+// cut: 即切替 / fade: 黒フェードアウト→次シーンへ黒フェードイン
+export type SceneTransition = 'cut' | 'fade'
+
 export interface Scene {
   id: string
   title: string | null
@@ -141,6 +145,8 @@ export interface Scene {
   color_tag?: SceneColorTag | null
   // シーン全体のカメラワーク
   camera_motion?: CameraMotion | null
+  // このシーンの冒頭で適用するつなぎ(前シーンの末尾と一緒に黒フェードする)
+  transition_in?: SceneTransition | null
   created_at: string
   updated_at: string
 }
