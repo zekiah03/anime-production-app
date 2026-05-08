@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Play,
   Plus,
+  Sparkles,
   Trash2,
   ChevronUp,
   ChevronDown,
@@ -25,6 +26,7 @@ import {
 } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar'
 import { LipSyncStage } from '@/components/lip-sync-stage'
+import { AIConversationGenerator } from '@/components/ai-conversation-generator'
 import { SaveStatusBadge, useSaveStatus } from '@/components/save-status'
 import { useToast } from '@/components/toast'
 import { SCENE_COLORS, sceneColorFor } from '@/lib/scene-colors'
@@ -93,6 +95,8 @@ export default function SceneEditorPage({
   const [telopStyle, setTelopStyle] = useState<TelopStyle>(DEFAULT_TELOP_STYLE)
   // プレビュー中のセリフ index
   const [previewIdx, setPreviewIdx] = useState<number | null>(null)
+  // AI 掛け合い生成ダイアログ
+  const [aiConvOpen, setAiConvOpen] = useState(false)
 
   const scene = scenes.find((s) => s.id === sceneId) ?? null
 
@@ -240,6 +244,64 @@ export default function SceneEditorPage({
       prev.map((sd) => (sd.dialogue?.id === dialogueId ? { ...sd, dialogue: updated } : sd)),
     )
     await save.track(saveDialogue(updated))
+  }
+
+  async function bulkInsertConversation(
+    lines: Array<{
+      character_id: string
+      text: string
+      emotion: string
+      motion: string
+      effect: string
+      notes: string
+    }>,
+  ) {
+    if (!scene) return
+    const now = new Date().toISOString()
+    let order =
+      sceneDialogues.reduce((m, sd) => Math.max(m, sd.order_index), -1) + 1
+    const newDialogues: Dialogue[] = []
+    const newSds: SdWithDialogue[] = []
+    for (const l of lines) {
+      const d: Dialogue = {
+        id: crypto.randomUUID(),
+        text: l.text,
+        character_id: l.character_id || null,
+        audio_id: null,
+        expression_id: null,
+        emotion: l.emotion || null,
+        notes: l.notes || null,
+        duration_ms: 3000,
+        created_at: now,
+        updated_at: now,
+      }
+      const sd: SceneDialogue = {
+        id: crypto.randomUUID(),
+        scene_id: scene.id,
+        dialogue_id: d.id,
+        order_index: order++,
+        se_id: null,
+        se_volume: 1,
+        character_x: 0.5,
+        character_scale: 1.0,
+        pause_after_ms: 0,
+        motion: l.motion === 'none' ? null : (l.motion as SceneDialogue['motion']),
+        effect: l.effect === 'none' ? null : (l.effect as SceneDialogue['effect']),
+        created_at: now,
+      }
+      try {
+        await save.track(saveDialogue(d))
+        await save.track(saveSceneDialogue(sd))
+        newDialogues.push(d)
+        newSds.push({ ...sd, dialogue: d })
+      } catch (e) {
+        console.error('[anime-app] bulk conv insert failed', e)
+      }
+    }
+    if (newDialogues.length > 0) {
+      setDialogues((prev) => [...newDialogues, ...prev])
+      setSceneDialogues((prev) => [...prev, ...newSds])
+    }
   }
 
   async function addNarration() {
@@ -541,6 +603,8 @@ export default function SceneEditorPage({
                   extraCharacters={extras}
                   silentDurationMs={previewSd?.dialogue?.duration_ms ?? 3000}
                   audioVolume={previewSd?.voice_volume ?? 1}
+                  motion={previewSd?.motion ?? null}
+                  effect={previewSd?.effect ?? null}
                   playing={previewIdx !== null}
                   onEnded={() => {
                     setPreviewIdx((idx) => {
@@ -559,10 +623,23 @@ export default function SceneEditorPage({
                 <h3 className="text-sm font-semibold text-foreground">
                   セリフ({sceneDialogues.length})
                 </h3>
-                <Button size="sm" onClick={addNarration} className="gap-1">
-                  <Plus size={14} />
-                  ナレーション追加
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setAiConvOpen(true)}
+                    className="gap-1"
+                    disabled={characters.length < 2}
+                    title={characters.length < 2 ? 'キャラを2人以上作ってください' : ''}
+                  >
+                    <Sparkles size={14} />
+                    AI 掛け合い
+                  </Button>
+                  <Button size="sm" onClick={addNarration} className="gap-1">
+                    <Plus size={14} />
+                    ナレーション追加
+                  </Button>
+                </div>
               </div>
               {sceneDialogues.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">
@@ -756,6 +833,15 @@ export default function SceneEditorPage({
           </aside>
         </div>
       </main>
+
+      <AIConversationGenerator
+        characters={characters}
+        open={aiConvOpen}
+        onClose={() => setAiConvOpen(false)}
+        onAccept={(lines) => {
+          void bulkInsertConversation(lines)
+        }}
+      />
     </div>
   )
 }

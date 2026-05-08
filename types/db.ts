@@ -159,6 +159,39 @@ export interface BgmTrack {
   created_at: string
 }
 
+// キャラのアクション(セリフ単位で発火する短いアニメーション)
+// none: 動かない
+// shake: 細かく震える(0.6s)
+// jump: 軽くジャンプ(0.45s)
+// pop_in: ポップしながら登場(0.3s, scale 0→1.1→1)
+// slide_in_left: 左からスライドイン(0.35s)
+// slide_in_right: 右からスライドイン(0.35s)
+// fade_in: フェードイン(0.4s)
+// zoom_in: 拡大しながら登場(0.3s, scale 0.5→1)
+export type CharacterMotion =
+  | 'none'
+  | 'shake'
+  | 'jump'
+  | 'pop_in'
+  | 'slide_in_left'
+  | 'slide_in_right'
+  | 'fade_in'
+  | 'zoom_in'
+
+// 画面エフェクト(キャラ近くに表示する emoji or 効果線)
+// anger: 💢, sweat: 💦, sparkle: ✨ * 3, heart: ❤️, shock: ⚡, question: ❓,
+// shock_lines: 集中線(中心へ収束する線), speed_lines: 流線(横に走る線)
+export type ScreenEffect =
+  | 'none'
+  | 'anger'
+  | 'sweat'
+  | 'sparkle'
+  | 'heart'
+  | 'shock'
+  | 'question'
+  | 'shock_lines'
+  | 'speed_lines'
+
 export interface SceneDialogue {
   id: string
   scene_id: string
@@ -179,6 +212,10 @@ export interface SceneDialogue {
   // グローバルのテロップ設定を個別セリフで上書きしたい場合に使う(null = 継承)
   telop_intro?: TelopIntro | null
   telop_shake?: TelopShake | null
+  // セリフ冒頭で発火するキャラのアクション
+  motion?: CharacterMotion | null
+  // セリフ中に表示する画面エフェクト
+  effect?: ScreenEffect | null
   created_at: string
 }
 

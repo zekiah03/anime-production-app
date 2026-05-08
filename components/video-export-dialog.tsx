@@ -15,10 +15,12 @@ import type {
   BgmTrack,
   Character,
   CharacterExpression,
+  CharacterMotion,
   IllustrationWithLayers,
   Layer,
   SceneCastMember,
   SceneWithDialogues,
+  ScreenEffect,
   SoundEffect,
   TelopShake,
   TelopStyle,
@@ -61,6 +63,228 @@ function computeShake(kind: TelopShake, elapsedMs: number): { x: number; y: numb
   return { x: Math.sin(t * 2.3) * amplitude, y: Math.cos(t * 3.1) * amplitude }
 }
 
+interface MotionFrame {
+  dx: number
+  dy: number
+  scale: number
+  alpha: number
+}
+
+const IDENTITY_MOTION: MotionFrame = { dx: 0, dy: 0, scale: 1, alpha: 1 }
+
+// CSS の motion-* と数値的に合わせたフレーム計算。終了後は IDENTITY を返す。
+function computeMotion(
+  motion: CharacterMotion | null | undefined,
+  elapsedMs: number,
+): MotionFrame {
+  if (!motion || motion === 'none') return IDENTITY_MOTION
+  switch (motion) {
+    case 'shake': {
+      const dur = 600
+      if (elapsedMs >= dur) return IDENTITY_MOTION
+      const t = elapsedMs / dur
+      const amp = 6 * (1 - t)
+      return { dx: Math.sin(elapsedMs / 30) * amp, dy: 0, scale: 1, alpha: 1 }
+    }
+    case 'jump': {
+      const dur = 450
+      if (elapsedMs >= dur) return IDENTITY_MOTION
+      const t = elapsedMs / dur
+      const dy = -32 * (4 * t * (1 - t))
+      return { dx: 0, dy, scale: 1, alpha: 1 }
+    }
+    case 'pop_in': {
+      const dur = 300
+      if (elapsedMs >= dur) return IDENTITY_MOTION
+      const t = elapsedMs / dur
+      if (t < 0.6) {
+        const u = t / 0.6
+        return { dx: 0, dy: 0, scale: 1.12 * u, alpha: u }
+      }
+      const u = (t - 0.6) / 0.4
+      return { dx: 0, dy: 0, scale: 1.12 - 0.12 * u, alpha: 1 }
+    }
+    case 'slide_in_left': {
+      const dur = 350
+      if (elapsedMs >= dur) return IDENTITY_MOTION
+      const t = elapsedMs / dur
+      const ease = 1 - Math.pow(1 - t, 3)
+      return { dx: -220 * (1 - ease), dy: 0, scale: 1, alpha: ease }
+    }
+    case 'slide_in_right': {
+      const dur = 350
+      if (elapsedMs >= dur) return IDENTITY_MOTION
+      const t = elapsedMs / dur
+      const ease = 1 - Math.pow(1 - t, 3)
+      return { dx: 220 * (1 - ease), dy: 0, scale: 1, alpha: ease }
+    }
+    case 'fade_in': {
+      const dur = 400
+      if (elapsedMs >= dur) return IDENTITY_MOTION
+      return { dx: 0, dy: 0, scale: 1, alpha: elapsedMs / dur }
+    }
+    case 'zoom_in': {
+      const dur = 300
+      if (elapsedMs >= dur) return IDENTITY_MOTION
+      const t = elapsedMs / dur
+      return { dx: 0, dy: 0, scale: 0.5 + 0.5 * t, alpha: t }
+    }
+  }
+  return IDENTITY_MOTION
+}
+
+// 画面エフェクトをキャンバスに描画。WIDTH/HEIGHT 基準で座標を計算する。
+function drawEffect(
+  ctx: CanvasRenderingContext2D,
+  effect: ScreenEffect | null | undefined,
+  elapsedMs: number,
+  WIDTH: number,
+  HEIGHT: number,
+) {
+  if (!effect || effect === 'none') return
+  const t = elapsedMs / 1000 // seconds
+
+  function emoji(text: string, x: number, y: number, sizePx: number, alpha: number) {
+    if (alpha <= 0) return
+    const prev = ctx.globalAlpha
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha))
+    ctx.font = `${sizePx}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(text, x, y)
+    ctx.globalAlpha = prev
+  }
+
+  switch (effect) {
+    case 'anger': {
+      // 0.5s ループのジョルト(揺れ拡大)。位置は右上。
+      const cycle = (elapsedMs % 500) / 500
+      const scale = 1 + 0.1 * Math.sin(cycle * Math.PI * 2)
+      const jitter = 4 * Math.sin(cycle * Math.PI * 6)
+      emoji('💢', WIDTH * 0.78 + jitter, HEIGHT * 0.18, WIDTH * 0.13 * scale, 1)
+      return
+    }
+    case 'sweat': {
+      // 1.6s ループで上から落ちる
+      const cycle = (elapsedMs % 1600) / 1600
+      const y = HEIGHT * 0.12 + (HEIGHT * 0.6) * cycle
+      const a = cycle < 0.2 ? cycle * 5 : cycle > 0.8 ? (1 - cycle) * 5 : 1
+      emoji('💦', WIDTH * 0.28, y, WIDTH * 0.11, a)
+      return
+    }
+    case 'sparkle': {
+      // 5箇所が時差で twinkle
+      const points: Array<[number, number, number]> = [
+        [0.18, 0.15, 0.0],
+        [0.78, 0.2, 0.3],
+        [0.1, 0.4, 0.6],
+        [0.86, 0.5, 0.15],
+        [0.24, 0.65, 0.45],
+      ]
+      for (const [px, py, delay] of points) {
+        const cycle = ((t + delay) % 1.1) / 1.1
+        const a = 0.4 + 0.6 * Math.abs(Math.sin(cycle * Math.PI))
+        const scale = 0.6 + 0.6 * Math.abs(Math.sin(cycle * Math.PI))
+        emoji('✨', WIDTH * px, HEIGHT * py, WIDTH * 0.08 * scale, a)
+      }
+      return
+    }
+    case 'heart': {
+      // 1.6s ループで上に浮き上がる(3 つを時差発生)
+      const points: Array<[number, number, number]> = [
+        [0.32, 0.78, 0.0],
+        [0.66, 0.7, 0.4],
+        [0.5, 0.84, 0.8],
+      ]
+      for (const [px, py, delay] of points) {
+        const cycle = ((t + delay) % 1.6) / 1.6
+        const dy = -HEIGHT * 0.6 * cycle
+        const scale = 0.6 + 0.6 * cycle
+        const a = cycle < 0.2 ? cycle * 5 : cycle > 0.8 ? (1 - cycle) * 5 : 1
+        emoji('❤️', WIDTH * px, HEIGHT * py + dy, WIDTH * 0.1 * scale, a)
+      }
+      return
+    }
+    case 'shock': {
+      const cycle = (elapsedMs % 500) / 500
+      const scale = 1 + 0.15 * Math.sin(cycle * Math.PI * 2)
+      const jitter = 6 * Math.sin(cycle * Math.PI * 6)
+      emoji('⚡', WIDTH * 0.78 + jitter, HEIGHT * 0.2, WIDTH * 0.16 * scale, 1)
+      return
+    }
+    case 'question': {
+      // 1.4s で pulse
+      const cycle = (elapsedMs % 1400) / 1400
+      let a = 0
+      let scale = 1
+      if (cycle < 0.2) {
+        a = cycle * 5
+        scale = 0.4 + (1.2 - 0.4) * (cycle / 0.2)
+      } else if (cycle < 0.6) {
+        a = 1
+        scale = 1.2 - 0.2 * ((cycle - 0.2) / 0.4)
+      } else {
+        a = 1 - (cycle - 0.6) / 0.4
+        scale = 1 - 0.05 * ((cycle - 0.6) / 0.4)
+      }
+      const prev = ctx.fillStyle
+      ctx.fillStyle = '#fbbf24'
+      emoji('❓', WIDTH * 0.74, HEIGHT * 0.14, WIDTH * 0.13 * scale, a)
+      ctx.fillStyle = prev as string
+      return
+    }
+    case 'shock_lines': {
+      // 中心から放射する黒い線。0.9s で広がりながらフェードアウトをループ。
+      const cycle = (elapsedMs % 900) / 900
+      const scale = 0.3 + 1.1 * cycle
+      const alpha = cycle < 0.2 ? cycle * 5 : 1 - (cycle - 0.2) / 0.8
+      if (alpha <= 0) return
+      const prev = ctx.globalAlpha
+      ctx.globalAlpha = alpha * 0.85
+      const cx = WIDTH / 2
+      const cy = HEIGHT / 2
+      const rOuter = Math.hypot(WIDTH, HEIGHT) * 0.6 * scale
+      const rInner = rOuter * 0.18
+      const lines = 60
+      ctx.fillStyle = '#000000'
+      for (let i = 0; i < lines; i++) {
+        const ang = (i / lines) * Math.PI * 2
+        const w = 0.04 // ~2.3deg
+        ctx.beginPath()
+        ctx.moveTo(cx + Math.cos(ang) * rInner, cy + Math.sin(ang) * rInner)
+        ctx.lineTo(cx + Math.cos(ang + w) * rOuter, cy + Math.sin(ang + w) * rOuter)
+        ctx.lineTo(cx + Math.cos(ang + w * 2) * rInner, cy + Math.sin(ang + w * 2) * rInner)
+        ctx.closePath()
+        ctx.fill()
+      }
+      ctx.globalAlpha = prev
+      return
+    }
+    case 'speed_lines': {
+      // 横方向の白い縞模様(0.6s でフェード in/out をループ)。両端のみ表示。
+      const cycle = (elapsedMs % 600) / 600
+      let a = 0
+      if (cycle < 0.15) a = cycle / 0.15
+      else if (cycle > 0.85) a = (1 - cycle) / 0.15
+      else a = 1
+      a *= 0.85
+      if (a <= 0) return
+      const prev = ctx.globalAlpha
+      ctx.globalAlpha = a
+      ctx.fillStyle = '#ffffff'
+      const lineSpacing = 18
+      const lineWidth = 2
+      const sideZone = WIDTH * 0.25
+      for (let y = 0; y < HEIGHT; y += lineSpacing) {
+        ctx.fillRect(0, y, sideZone, lineWidth)
+        ctx.fillRect(WIDTH - sideZone, y, sideZone, lineWidth)
+      }
+      ctx.globalAlpha = prev
+      return
+    }
+  }
+}
+
 // 1シーン分の解決済み情報
 interface SceneSegment {
   scene: SceneWithDialogues
@@ -97,6 +321,8 @@ interface ResolvedDialogue {
   silentDurationMs: number
   pauseAfterMs: number
   telopStyleForThis: TelopStyle
+  motion: CharacterMotion | null
+  effect: ScreenEffect | null
 }
 
 export function VideoExportDialog({
@@ -246,6 +472,8 @@ export function VideoExportDialog({
             silentDurationMs,
             pauseAfterMs,
             telopStyleForThis,
+            motion: sd.motion ?? null,
+            effect: sd.effect ?? null,
           } as ResolvedDialogue
         })
         .filter((x): x is ResolvedDialogue => x !== null)
@@ -356,11 +584,16 @@ export function VideoExportDialog({
         const baseW = img.width * fitScale
         const baseH = img.height * fitScale
         const userScale = current.characterScale
-        const w = baseW * userScale
-        const h = baseH * userScale
-        const cx = WIDTH * current.characterX
+        // motion: dx/dy 移動 + scale 倍率 + alpha 不透明度。基準は身長(baseH)に対する割合。
+        const m = computeMotion(current.motion, elapsedMs)
+        const w = baseW * userScale * m.scale
+        const h = baseH * userScale * m.scale
+        const cx = WIDTH * current.characterX + m.dx
         const x = cx - w / 2
-        const y = HEIGHT - h
+        // motion の dy は身長基準の割合で扱うと崩れにくい(身長 = baseH * userScale ≒ HEIGHT)
+        const y = HEIGHT - h + m.dy
+        const prevAlpha = ctx.globalAlpha
+        ctx.globalAlpha = prevAlpha * m.alpha
         if (current.characterFlipped) {
           ctx.save()
           ctx.translate(cx, 0)
@@ -370,8 +603,12 @@ export function VideoExportDialog({
         } else {
           ctx.drawImage(img, x, y, w, h)
         }
+        ctx.globalAlpha = prevAlpha
       }
     }
+
+    // 画面エフェクト(キャラの上、テロップの下)
+    drawEffect(ctx, current.effect, elapsedMs, WIDTH, HEIGHT)
 
     // テロップ
     if (current.text) {

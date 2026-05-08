@@ -2,9 +2,39 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Users } from 'lucide-react'
-import type { Character, CharacterExpression, Layer, TelopStyle } from '@/types/db'
+import type {
+  Character,
+  CharacterExpression,
+  CharacterMotion,
+  Layer,
+  ScreenEffect,
+  TelopStyle,
+} from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import { toBandStyle, toTextStyle } from '@/components/telop-settings-dialog'
+import { EffectOverlay } from '@/components/effect-overlay'
+
+// motion キー名と対応する CSS クラス。none は未指定時のため割り当てなし。
+export const MOTION_CLASS: Record<Exclude<CharacterMotion, 'none'>, string> = {
+  shake: 'motion-shake',
+  jump: 'motion-jump',
+  pop_in: 'motion-pop-in',
+  slide_in_left: 'motion-slide-in-left',
+  slide_in_right: 'motion-slide-in-right',
+  fade_in: 'motion-fade-in',
+  zoom_in: 'motion-zoom-in',
+}
+
+export const MOTION_LABEL: Record<CharacterMotion, string> = {
+  none: '動きなし',
+  shake: '震える',
+  jump: 'ジャンプ',
+  pop_in: 'ポップイン',
+  slide_in_left: '左からスライド',
+  slide_in_right: '右からスライド',
+  fade_in: 'フェードイン',
+  zoom_in: '拡大して登場',
+}
 
 // 発話しない共演キャラ(静止画で並べる)
 export interface StageExtraCharacter {
@@ -41,6 +71,10 @@ interface LipSyncStageProps {
   playbackRate?: number
   // 音声音量 0..1 (既定 1.0)
   audioVolume?: number
+  // セリフ冒頭で発火するキャラのアクション(セリフごとに変わる前提なので playing の立ち上がりで再生)
+  motion?: CharacterMotion | null
+  // 画面エフェクト(playing 中ループ表示)
+  effect?: ScreenEffect | null
   onEnded?: () => void
   className?: string
 }
@@ -74,6 +108,8 @@ export function LipSyncStage({
   silentDurationMs,
   playbackRate,
   audioVolume,
+  motion,
+  effect,
   onEnded,
   className,
 }: LipSyncStageProps) {
@@ -83,6 +119,19 @@ export function LipSyncStage({
   const cx = typeof characterX === 'number' ? characterX : 0.5
   const cs = typeof characterScale === 'number' ? characterScale : 1.0
   const flipSx = characterFlipped ? -1 : 1
+
+  // motion アニメーションを再生のたびに再発火させるためのカウンター。
+  // playing が false→true になった時点 / motion が変わった時点でインクリメントする。
+  const [motionKey, setMotionKey] = useState(0)
+  const prevPlayingRef = useRef(false)
+  useEffect(() => {
+    if (playing && !prevPlayingRef.current) {
+      setMotionKey((k) => k + 1)
+    }
+    prevPlayingRef.current = playing
+  }, [playing, motion])
+  const motionClass =
+    motion && motion !== 'none' && playing ? MOTION_CLASS[motion] : ''
 
   // typewriter の段階表示用(intro=typewriter 以外のときは常に全文)
   const [revealedText, setRevealedText] = useState<string>(caption ?? '')
@@ -322,22 +371,34 @@ export function LipSyncStage({
         )
       })}
       {img ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          key={img}
-          src={img}
-          alt={character?.name ?? ''}
-          className="absolute"
+        // 3層: 外= 絶対配置と中央寄せ / 中= motion アニメーション / 内= 画像 + 左右反転
+        <div
+          className="absolute pointer-events-none"
           style={{
             bottom: 0,
             left: `${cx * 100}%`,
             height: `${cs * 100}%`,
-            width: 'auto',
-            maxWidth: 'none',
-            transform: `translateX(-50%) scaleX(${flipSx})`,
-            objectFit: 'contain',
+            transform: 'translateX(-50%)',
           }}
-        />
+        >
+          <div
+            key={`motion-${motionKey}`}
+            className={`h-full ${motionClass}`}
+            style={{ transformOrigin: 'bottom center' }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={img}
+              alt={character?.name ?? ''}
+              className="h-full w-auto"
+              style={{
+                maxWidth: 'none',
+                transform: `scaleX(${flipSx})`,
+                objectFit: 'contain',
+              }}
+            />
+          </div>
+        </div>
       ) : character ? (
         // キャラは指定されているが画像未登録
         <div className="relative text-center text-muted-foreground p-4">
@@ -345,6 +406,7 @@ export function LipSyncStage({
           <p className="text-xs">画像を登録してください</p>
         </div>
       ) : null /* ナレーション: 主役枠は空 */}
+      {playing && <EffectOverlay effect={effect ?? null} />}
       {caption && playing && (
         <div
           className="absolute inset-x-2 pointer-events-none"
