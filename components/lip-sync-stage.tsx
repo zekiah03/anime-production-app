@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Users } from 'lucide-react'
 import type {
+  CameraMotion,
   Character,
   CharacterExpression,
   CharacterMotion,
@@ -13,6 +14,25 @@ import type {
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import { toBandStyle, toTextStyle } from '@/components/telop-settings-dialog'
 import { EffectOverlay } from '@/components/effect-overlay'
+
+const CAMERA_CLASS: Record<Exclude<CameraMotion, 'none'>, string> = {
+  zoom_in_slow: 'camera-zoom-in',
+  zoom_out_slow: 'camera-zoom-out',
+  pan_right: 'camera-pan-right',
+  pan_left: 'camera-pan-left',
+  shake_subtle: 'camera-shake-subtle',
+  shake_heavy: 'camera-shake-heavy',
+}
+
+export const CAMERA_LABEL: Record<CameraMotion, string> = {
+  none: 'カメラ固定',
+  zoom_in_slow: 'ゆっくりズームイン',
+  zoom_out_slow: 'ゆっくりズームアウト',
+  pan_right: '右へパン',
+  pan_left: '左へパン',
+  shake_subtle: '微振動(緊張)',
+  shake_heavy: '強振動(衝撃)',
+}
 
 // motion キー名と対応する CSS クラス。none は未指定時のため割り当てなし。
 export const MOTION_CLASS: Record<Exclude<CharacterMotion, 'none'>, string> = {
@@ -75,6 +95,8 @@ interface LipSyncStageProps {
   motion?: CharacterMotion | null
   // 画面エフェクト(playing 中ループ表示)
   effect?: ScreenEffect | null
+  // シーン全体のカメラワーク(背景+キャラ全部にかかる)
+  cameraMotion?: CameraMotion | null
   onEnded?: () => void
   className?: string
 }
@@ -110,9 +132,12 @@ export function LipSyncStage({
   audioVolume,
   motion,
   effect,
+  cameraMotion,
   onEnded,
   className,
 }: LipSyncStageProps) {
+  const cameraClass =
+    cameraMotion && cameraMotion !== 'none' ? CAMERA_CLASS[cameraMotion] : ''
   const rate = typeof playbackRate === 'number' && playbackRate > 0 ? playbackRate : 1
   const vol = typeof audioVolume === 'number' ? Math.max(0, Math.min(1, audioVolume)) : 1
   const effectiveStyle = telopStyle ?? DEFAULT_TELOP_STYLE
@@ -336,6 +361,12 @@ export function LipSyncStage({
         'flex items-center justify-center bg-background rounded-md border border-border aspect-square overflow-hidden relative'
       }
     >
+      {/* カメラワーク用ラッパー: 背景・共演者・発話キャラ・エフェクトをまとめて動かす。
+          cameraMotion を変えると key が変わって CSS アニメが頭から再生される。 */}
+      <div
+        key={`cam-${cameraMotion ?? 'none'}`}
+        className={`absolute inset-0 ${cameraClass}`}
+      >
       {backgroundLayers?.map((layer) => (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -407,6 +438,7 @@ export function LipSyncStage({
         </div>
       ) : null /* ナレーション: 主役枠は空 */}
       {playing && <EffectOverlay effect={effect ?? null} />}
+      </div>{/* /camera wrapper */}
       {caption && playing && (
         <div
           className="absolute inset-x-2 pointer-events-none"

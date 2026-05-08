@@ -325,3 +325,66 @@
 .effect-speed-lines {
   animation: effect-speed-lines-fade 0.6s linear infinite;
 }
+
+/* ==================== Camera motions (full-stage transforms) ==================== */
+
+@keyframes camera-zoom-in {
+  0% { transform: scale(1.0); }
+  100% { transform: scale(1.15); }
+}
+
+@keyframes camera-zoom-out {
+  0% { transform: scale(1.15); }
+  100% { transform: scale(1.0); }
+}
+
+@keyframes camera-pan-right {
+  0% { transform: translateX(-3%) scale(1.08); }
+  100% { transform: translateX(3%) scale(1.08); }
+}
+
+@keyframes camera-pan-left {
+  0% { transform: translateX(3%) scale(1.08); }
+  100% { transform: translateX(-3%) scale(1.08); }
+}
+
+@keyframes camera-shake-subtle {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(-2px, 1px); }
+  50% { transform: translate(1px, -2px); }
+  75% { transform: translate(-1px, -1px); }
+}
+
+@keyframes camera-shake-heavy {
+  0%, 100% { transform: translate(0, 0); }
+  10% { transform: translate(-6px, 4px); }
+  20% { transform: translate(6px, -4px); }
+  30% { transform: translate(-5px, -3px); }
+  40% { transform: translate(5px, 3px); }
+  50% { transform: translate(-4px, 5px); }
+  60% { transform: translate(4px, -2px); }
+  70% { transform: translate(-3px, 4px); }
+  80% { transform: translate(3px, -4px); }
+  90% { transform: translate(-2px, 2px); }
+}
+
+.camera-zoom-in {
+  animation: camera-zoom-in 8s ease-out forwards;
+  transform-origin: center center;
+}
+.camera-zoom-out {
+  animation: camera-zoom-out 8s ease-out forwards;
+  transform-origin: center center;
+}
+.camera-pan-right {
+  animation: camera-pan-right 8s linear forwards;
+}
+.camera-pan-left {
+  animation: camera-pan-left 8s linear forwards;
+}
+.camera-shake-subtle {
+  animation: camera-shake-subtle 0.4s infinite;
+}
+.camera-shake-heavy {
+  animation: camera-shake-heavy 0.3s infinite;
+}
