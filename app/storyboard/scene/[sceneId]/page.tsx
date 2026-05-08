@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import { Sidebar } from '@/components/sidebar'
 import { LipSyncStage } from '@/components/lip-sync-stage'
+import { pickExpressionByEmotion } from '@/lib/emotion-expression'
 import { AIConversationGenerator } from '@/components/ai-conversation-generator'
 import { SaveStatusBadge, useSaveStatus } from '@/components/save-status'
 import { useToast } from '@/components/toast'
@@ -596,7 +597,13 @@ export default function SceneEditorPage({
                   character={previewChar}
                   expressions={previewCharExprs}
                   audioUrl={previewAudio?.file_url ?? null}
-                  overrideExpressionId={previewSd?.dialogue?.expression_id ?? null}
+                  overrideExpressionId={
+                    previewSd?.dialogue?.expression_id ??
+                    pickExpressionByEmotion(
+                      previewSd?.dialogue?.emotion ?? null,
+                      previewCharExprs,
+                    )
+                  }
                   caption={previewSd?.dialogue?.text ?? null}
                   telopStyle={telopStyle}
                   backgroundLayers={bgLayers}

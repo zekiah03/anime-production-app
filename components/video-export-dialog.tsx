@@ -30,6 +30,7 @@ import type {
 import { COLOR_FILTER_CSS } from '@/types/db'
 import { DEFAULT_TELOP_STYLE, TELOP_FONT_FAMILY } from '@/types/db'
 import { hexToRgba } from '@/components/telop-settings-dialog'
+import { pickExpressionByEmotion } from '@/lib/emotion-expression'
 
 const LIPSYNC_THRESHOLD = 40
 const TICK_MS = 100
@@ -525,9 +526,13 @@ export function VideoExportDialog({
             mouthOpen: charExpressions.find((x) => x.kind === 'mouth_open') ?? null,
             mouthClosed: charExpressions.find((x) => x.kind === 'mouth_closed') ?? null,
             blink: charExpressions.find((x) => x.kind === 'blink') ?? null,
-            override: d.expression_id
-              ? charExpressions.find((x) => x.id === d.expression_id) ?? null
-              : null,
+            override: (() => {
+              if (d.expression_id) {
+                return charExpressions.find((x) => x.id === d.expression_id) ?? null
+              }
+              const auto = pickExpressionByEmotion(d.emotion, charExpressions)
+              return auto ? charExpressions.find((x) => x.id === auto) ?? null : null
+            })(),
             se,
             seVolume,
             characterX,

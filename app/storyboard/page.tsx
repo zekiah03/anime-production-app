@@ -57,6 +57,7 @@ import {
   saveVideo,
 } from '@/lib/db'
 import { LipSyncStage } from '@/components/lip-sync-stage'
+import { pickExpressionByEmotion } from '@/lib/emotion-expression'
 import {
   Dialog,
   DialogContent,
@@ -5312,7 +5313,8 @@ function ScenePlayerDialog({
         text: d.text,
         character,
         audio,
-        expressionId: d.expression_id,
+        expressionId:
+          d.expression_id ?? pickExpressionByEmotion(d.emotion, charExpressions),
         charExpressions,
         se,
         seVolume,
