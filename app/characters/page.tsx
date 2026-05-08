@@ -487,17 +487,69 @@ function CharacterDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-[min(96vw,1400px)] max-h-[92vh] overflow-auto sm:rounded-lg">
-        <DialogHeader>
+      <DialogContent className="max-w-[98vw] w-[98vw] h-[95vh] max-h-[95vh] p-4 overflow-hidden flex flex-col sm:rounded-lg">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle>{character?.name ?? ''} の詳細</DialogTitle>
-          <DialogDescription>表情・音声・セリフをタブから管理できます</DialogDescription>
+          <DialogDescription>
+            左に画像・表情を常時表示。右で録音・セリフ・ナレッジ編集ができます
+          </DialogDescription>
         </DialogHeader>
 
         {loading || !character ? (
           <p className="text-center text-muted-foreground py-8">読み込み中...</p>
         ) : (
-          <Tabs defaultValue="preview" className="w-full">
-            <TabsList className="grid w-full grid-cols-5">
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-[360px_1fr] xl:grid-cols-[420px_1fr] gap-4 overflow-hidden">
+            {/* 左: 画像プレビュー(全タブで常に見える) */}
+            <div className="overflow-auto pr-2 space-y-4">
+              <div className="bg-background border border-border rounded-md overflow-hidden aspect-square flex items-center justify-center">
+                {character.image_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={character.image_url}
+                    alt={character.name}
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <div className="text-muted-foreground text-sm">メイン画像なし</div>
+                )}
+              </div>
+              {expressions.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold text-muted-foreground mb-2">
+                    登録表情({expressions.length})
+                  </h4>
+                  <div className="grid grid-cols-3 gap-2">
+                    {expressions.map((e) => (
+                      <div
+                        key={e.id}
+                        className="border border-border rounded overflow-hidden bg-card"
+                        title={`${e.name} (${KIND_LABEL[e.kind]})`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={e.image_url}
+                          alt={e.name}
+                          className="w-full aspect-square object-cover"
+                        />
+                        <p className="text-[10px] text-center text-muted-foreground py-1 truncate px-1">
+                          {KIND_LABEL[e.kind]}/{e.name}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {character.description && (
+                <div className="text-xs text-muted-foreground">
+                  <h4 className="font-semibold mb-1">説明</h4>
+                  <p className="whitespace-pre-wrap">{character.description}</p>
+                </div>
+              )}
+            </div>
+
+            {/* 右: タブ */}
+            <Tabs defaultValue="preview" className="flex flex-col overflow-hidden">
+              <TabsList className="grid w-full grid-cols-5 flex-shrink-0">
               <TabsTrigger value="preview">プレビュー</TabsTrigger>
               <TabsTrigger value="expressions">表情</TabsTrigger>
               <TabsTrigger value="audio">音声</TabsTrigger>
@@ -505,7 +557,7 @@ function CharacterDetailDialog({
               <TabsTrigger value="knowledge">ナレッジ</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="preview" className="mt-4">
+            <TabsContent value="preview" className="mt-4 flex-1 overflow-auto pr-2">
               <LipSyncPreview
                 character={character}
                 expressions={expressions}
@@ -513,7 +565,7 @@ function CharacterDetailDialog({
               />
             </TabsContent>
 
-            <TabsContent value="expressions" className="mt-4 space-y-6">
+            <TabsContent value="expressions" className="mt-4 flex-1 overflow-auto pr-2 space-y-6">
               <div className="border border-border rounded-lg p-4">
                 <h4 className="font-semibold text-foreground mb-3 flex items-center gap-2">
                   <Smile size={18} /> 表情を追加
@@ -597,7 +649,7 @@ function CharacterDetailDialog({
               </div>
             </TabsContent>
 
-            <TabsContent value="audio" className="mt-4">
+            <TabsContent value="audio" className="mt-4 flex-1 overflow-auto pr-2">
               <CharacterAudioTab
                 character={character}
                 audioFiles={audioFiles}
@@ -605,7 +657,7 @@ function CharacterDetailDialog({
               />
             </TabsContent>
 
-            <TabsContent value="dialogues" className="mt-4">
+            <TabsContent value="dialogues" className="mt-4 flex-1 overflow-auto pr-2">
               <CharacterDialoguesTab
                 character={character}
                 dialogues={dialogues}
@@ -615,10 +667,11 @@ function CharacterDetailDialog({
               />
             </TabsContent>
 
-            <TabsContent value="knowledge" className="mt-4">
+            <TabsContent value="knowledge" className="mt-4 flex-1 overflow-auto pr-2">
               <CharacterKnowledgeTab character={character} onChange={onCharacterChange} />
             </TabsContent>
-          </Tabs>
+            </Tabs>
+          </div>
         )}
       </DialogContent>
     </Dialog>
