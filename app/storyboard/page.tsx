@@ -4642,7 +4642,7 @@ export default function StoryboardPage() {
                 }
               }}
             >
-              <DialogContent className="max-w-lg">
+              <DialogContent className="max-w-[min(92vw,800px)] sm:rounded-lg">
                 <DialogHeader>
                   <DialogTitle>スクリプト一括貼り付け</DialogTitle>
                   <DialogDescription>
@@ -4690,7 +4690,7 @@ export default function StoryboardPage() {
             </Dialog>
             {/* 未使用アセット掃除 */}
             <Dialog open={showCleanup} onOpenChange={(o) => setShowCleanup(o)}>
-              <DialogContent className="max-w-lg">
+              <DialogContent className="max-w-[min(92vw,800px)] sm:rounded-lg">
                 <DialogHeader>
                   <DialogTitle>未使用アセットの掃除</DialogTitle>
                   <DialogDescription>
@@ -4776,7 +4776,7 @@ export default function StoryboardPage() {
               open={!!charLinesViewId}
               onOpenChange={(o) => !o && setCharLinesViewId(null)}
             >
-              <DialogContent className="max-w-xl">
+              <DialogContent className="max-w-[min(92vw,900px)] sm:rounded-lg">
                 <DialogHeader>
                   <DialogTitle>キャラ別セリフ一覧</DialogTitle>
                   <DialogDescription>
@@ -4904,7 +4904,7 @@ export default function StoryboardPage() {
                 if (!o) setResetInput('')
               }}
             >
-              <DialogContent className="max-w-md">
+              <DialogContent className="max-w-[min(92vw,720px)] sm:rounded-lg">
                 <DialogHeader>
                   <DialogTitle className="text-destructive">
                     すべてのデータを削除
@@ -4945,7 +4945,7 @@ export default function StoryboardPage() {
             </Dialog>
             {/* キャラ一括置換 */}
             <Dialog open={showCharReplace} onOpenChange={(o) => setShowCharReplace(o)}>
-              <DialogContent className="max-w-md">
+              <DialogContent className="max-w-[min(92vw,720px)] sm:rounded-lg">
                 <DialogHeader>
                   <DialogTitle>キャラ一括置換</DialogTitle>
                   <DialogDescription>
@@ -5022,7 +5022,7 @@ export default function StoryboardPage() {
             </Dialog>
             {/* ショートカットヘルプ(? キーで開閉) */}
             <Dialog open={showShortcutsHelp} onOpenChange={(o) => setShowShortcutsHelp(o)}>
-              <DialogContent className="max-w-md">
+              <DialogContent className="max-w-[min(92vw,720px)] sm:rounded-lg">
                 <DialogHeader>
                   <DialogTitle>キーボードショートカット</DialogTitle>
                   <DialogDescription>
@@ -5070,7 +5070,7 @@ export default function StoryboardPage() {
             </Dialog>
             {/* BGM 一括変更ダイアログ */}
             <Dialog open={showBulkBgm} onOpenChange={(o) => !o && setShowBulkBgm(false)}>
-              <DialogContent className="max-w-md">
+              <DialogContent className="max-w-[min(92vw,720px)] sm:rounded-lg">
                 <DialogHeader>
                   <DialogTitle>
                     BGM 一括変更(

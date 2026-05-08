@@ -81,7 +81,7 @@ export function TelopSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xl max-h-[90vh] overflow-auto">
+      <DialogContent className="max-w-[min(92vw,900px)] max-h-[92vh] overflow-auto sm:rounded-lg">
         <DialogHeader>
           <DialogTitle>テロップ設定</DialogTitle>
           <DialogDescription>

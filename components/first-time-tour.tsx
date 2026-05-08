@@ -78,7 +78,7 @@ export function FirstTimeTour() {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && finish()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-[min(92vw,800px)] sm:rounded-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Icon size={18} className="text-primary" />
