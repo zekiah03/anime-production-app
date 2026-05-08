@@ -20,7 +20,7 @@ import { SceneCardSkeleton } from '@/components/skeleton'
 import { resetFirstTimeTour } from '@/components/first-time-tour'
 import { SCENE_COLORS, sceneColorFor } from '@/lib/scene-colors'
 import { charColorHsl } from '@/lib/char-color'
-import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, CharacterMotion, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, ScreenEffect, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset, SceneColorTag } from '@/types/db'
+import type { Scene, Dialogue, SceneWithDialogues, Character, AudioFile, CharacterExpression, CharacterMotion, CameraMotion, IllustrationWithLayers, Layer, BgmTrack, SoundEffect, SceneDialogue, ScreenEffect, TelopStyle, TelopIntro, TelopShake, SceneCastMember, Video, CastPreset, SceneColorTag } from '@/types/db'
 import { DEFAULT_TELOP_STYLE } from '@/types/db'
 import {
   clearStore,
@@ -5125,6 +5125,8 @@ interface SceneDialogueResolved {
   motion: CharacterMotion | null
   // セリフ中の画面エフェクト
   effect: ScreenEffect | null
+  // シーン全体のカメラワーク(全セリフ共通)
+  cameraMotion: CameraMotion | null
 }
 
 interface StageExtraResolved {
@@ -5288,6 +5290,7 @@ function ScenePlayerDialog({
         telopStyleForThis,
         motion: sd.motion ?? null,
         effect: sd.effect ?? null,
+        cameraMotion: scene.camera_motion ?? null,
       } satisfies SceneDialogueResolved
     })
     // 採用ルール: (キャラ+音声) or (テキストあり= ナレーション)
@@ -5411,6 +5414,7 @@ function ScenePlayerDialog({
                 audioVolume={current?.voiceVolume ?? 1}
                 motion={current?.motion ?? null}
                 effect={current?.effect ?? null}
+                cameraMotion={current?.cameraMotion ?? null}
                 playing={playing}
                 onEnded={handleEnded}
               />

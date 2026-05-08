@@ -52,6 +52,7 @@ import {
 import type {
   AudioFile,
   BgmTrack,
+  CameraMotion,
   Character,
   CharacterExpression,
   Dialogue,
@@ -605,6 +606,7 @@ export default function SceneEditorPage({
                   audioVolume={previewSd?.voice_volume ?? 1}
                   motion={previewSd?.motion ?? null}
                   effect={previewSd?.effect ?? null}
+                  cameraMotion={scene?.camera_motion ?? null}
                   playing={previewIdx !== null}
                   onEnded={() => {
                     setPreviewIdx((idx) => {
@@ -755,6 +757,29 @@ export default function SceneEditorPage({
                     {i.name}
                   </option>
                 ))}
+              </select>
+            </div>
+            <div>
+              <p className="text-[10px] font-medium text-muted-foreground mb-1">
+                カメラワーク
+              </p>
+              <select
+                value={scene.camera_motion ?? 'none'}
+                onChange={(e) =>
+                  persistScene({
+                    camera_motion: (e.target.value as CameraMotion) || 'none',
+                  })
+                }
+                className="w-full px-2 py-1.5 bg-background border border-input rounded text-sm text-foreground"
+                title="シーン全体のカメラの動き"
+              >
+                <option value="none">カメラ固定</option>
+                <option value="zoom_in_slow">ゆっくりズームイン</option>
+                <option value="zoom_out_slow">ゆっくりズームアウト</option>
+                <option value="pan_right">右へパン</option>
+                <option value="pan_left">左へパン</option>
+                <option value="shake_subtle">微振動(緊張)</option>
+                <option value="shake_heavy">強振動(衝撃)</option>
               </select>
             </div>
             <div>

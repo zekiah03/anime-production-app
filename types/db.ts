@@ -114,6 +114,19 @@ export interface Dialogue {
   updated_at: string
 }
 
+// シーン全体に適用するカメラの動き(背景+キャラ全部にまとめてかかる)
+// none: 動かない / zoom_in_slow: 8s でゆっくり拡大 / zoom_out_slow: 8s で縮小
+// pan_right: 横スクロール風(右へ) / pan_left: 横スクロール風(左へ)
+// shake_subtle: 微振動(緊張感の演出)/ shake_heavy: 強振動(衝撃の演出)
+export type CameraMotion =
+  | 'none'
+  | 'zoom_in_slow'
+  | 'zoom_out_slow'
+  | 'pan_right'
+  | 'pan_left'
+  | 'shake_subtle'
+  | 'shake_heavy'
+
 export interface Scene {
   id: string
   title: string | null
@@ -126,6 +139,8 @@ export interface Scene {
   order_index: number
   // 視覚的グルーピング用のカラータグ(7 色パレット名 or null)
   color_tag?: SceneColorTag | null
+  // シーン全体のカメラワーク
+  camera_motion?: CameraMotion | null
   created_at: string
   updated_at: string
 }
